@@ -21,7 +21,11 @@
       "Bash(curl -s \"https://api.render.com/v1/services/srv-d757b48ule4c73ff5po0/deploys/dep-d757b50ule4c73ff5q30/logs\" -H \"Authorization: Bearer rnd_nMnZz6iEMxJbUgpQuTjDw2dfDU8g\")",
       "Bash(python3 -c \":*)",
       "Bash(curl -s \"https://api.render.com/v1/deploys/dep-d757b50ule4c73ff5q30/logs\" -H \"Authorization: Bearer rnd_nMnZz6iEMxJbUgpQuTjDw2dfDU8g\")",
-      "Bash(curl -s \"https://api.render.com/v1/services/srv-d757b48ule4c73ff5po0/events\" -H \"Authorization: Bearer rnd_nMnZz6iEMxJbUgpQuTjDw2dfDU8g\")"
+      "Bash(curl -s \"https://api.render.com/v1/services/srv-d757b48ule4c73ff5po0/events\" -H \"Authorization: Bearer rnd_nMnZz6iEMxJbUgpQuTjDw2dfDU8g\")",
+      "Bash(curl -s \"https://api.render.com/v1/services/srv-d757b48ule4c73ff5po0/deploys?limit=1\" -H \"Authorization: Bearer rnd_nMnZz6iEMxJbUgpQuTjDw2dfDU8g\")",
+      "Bash(curl -s -X POST \"https://api.render.com/v1/services/srv-d757b48ule4c73ff5po0/deploys\" -H \"Authorization: Bearer rnd_nMnZz6iEMxJbUgpQuTjDw2dfDU8g\" -H \"Content-Type: application/json\" -d '{}')",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(f''''Deploy: {d[\"\"id\"\"]} - {d[\"\"status\"\"]}''''\\)\")",
+      "Bash(curl -s \"https://ultimate-translator-ndxy.onrender.com/api/models\")"
     ]
   }
 }

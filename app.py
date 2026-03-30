@@ -188,8 +188,9 @@ def api_models():
 @app.route('/api/analyze', methods=['POST'])
 def api_analyze():
     """
-    Analyze a file and return stats + cost estimation.
-    Accepts file upload + model selection.
+    Analyze a file and return stats + token count.
+    No model parameter required - cost calculation happens client-side
+    using pricing data from /api/models.
     """
     if 'file' not in request.files:
         return jsonify({'error': 'Nessun file caricato'}), 400
@@ -202,8 +203,6 @@ def api_analyze():
     if ext not in ALLOWED_EXTENSIONS:
         return jsonify({'error': f'Formato non supportato: .{ext}'}), 400
 
-    model = request.form.get('model', 'claude-sonnet-4-20250514')
-
     # Save file temporarily
     temp_id = str(uuid.uuid4())
     safe_name = secure_filename(file.filename)
@@ -211,8 +210,6 @@ def api_analyze():
 
     try:
         file.save(temp_path)
-
-        from translator import MODEL_PRICING
 
         if ext == 'epub':
             from epub_handler import analyze_epub
@@ -224,24 +221,6 @@ def api_analyze():
             analysis['file_type'] = 'pdf'
         else:
             return jsonify({'error': 'Formato non supportato'}), 400
-
-        # Calculate cost
-        pricing = MODEL_PRICING.get(model, {})
-        input_tokens = analysis['estimated_tokens']
-        output_tokens = int(input_tokens * 1.1)  # Translation output ~1.1x input
-
-        input_cost = (input_tokens / 1_000_000) * pricing.get('input_cost', 0)
-        output_cost = (output_tokens / 1_000_000) * pricing.get('output_cost', 0)
-        total_cost = input_cost + output_cost
-
-        analysis['model'] = model
-        analysis['model_display_name'] = pricing.get('display_name', model)
-        analysis['input_tokens'] = input_tokens
-        analysis['output_tokens'] = output_tokens
-        analysis['input_cost'] = round(input_cost, 4)
-        analysis['output_cost'] = round(output_cost, 4)
-        analysis['total_cost'] = round(total_cost, 4)
-        analysis['cost_formatted'] = f"${total_cost:.4f}"
 
         return jsonify(analysis)
 

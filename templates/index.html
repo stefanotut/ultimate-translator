@@ -3,7 +3,83 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ULTIMATE TRANSLATOR - Traduttore AI per EPUB e PDF</title>
+    <title>ULTIMATE TRANSLATOR - Traduzione AI di PDF e EPUB | Traduci libri con ChatGPT e Claude</title>
+    <meta name="description" content="Traduzione AI di PDF e EPUB con ChatGPT e Claude. Traduci libri e documenti con intelligenza artificiale. Zero markup, paghi solo il costo API. Traduzione automatica PDF ed EPUB di alta qualita.">
+    <meta name="keywords" content="traduzione AI PDF, traduzione IA EPUB, tradurre libri con intelligenza artificiale, traduzione automatica PDF, ChatGPT traduzione, Claude traduzione, traduttore AI, traduzione libri">
+    <meta name="robots" content="index, follow">
+    <link rel="canonical" href="https://ultimatetranslator.com/">
+
+    <!-- Open Graph -->
+    <meta property="og:title" content="ULTIMATE TRANSLATOR - Traduzione AI di PDF e EPUB">
+    <meta property="og:description" content="Traduci libri e documenti PDF/EPUB con ChatGPT e Claude. Zero markup, paghi solo il costo API diretto.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://ultimatetranslator.com/">
+    <meta property="og:locale" content="it_IT">
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="ULTIMATE TRANSLATOR - Traduzione AI di PDF e EPUB">
+    <meta name="twitter:description" content="Traduci libri e documenti PDF/EPUB con ChatGPT e Claude. Zero markup sul prezzo.">
+
+    <!-- JSON-LD Structured Data -->
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "ULTIMATE TRANSLATOR",
+        "applicationCategory": "UtilitiesApplication",
+        "operatingSystem": "Web",
+        "description": "Servizio di traduzione AI per PDF e EPUB. Utilizza i modelli di OpenAI (ChatGPT) e Anthropic (Claude) per tradurre libri e documenti con intelligenza artificiale. Zero markup, costo API diretto.",
+        "offers": {
+            "@type": "Offer",
+            "price": "0",
+            "priceCurrency": "USD",
+            "description": "Gratuito - paghi solo il costo API di OpenAI o Anthropic"
+        },
+        "featureList": [
+            "Traduzione AI PDF",
+            "Traduzione AI EPUB",
+            "Supporto 25+ lingue",
+            "Mantiene formattazione originale",
+            "Modelli OpenAI e Anthropic"
+        ]
+    }
+    </script>
+
+    <!-- FAQ Structured Data -->
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "mainEntity": [
+            {
+                "@type": "Question",
+                "name": "Quanto costa tradurre un libro?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "Il costo dipende dalla lunghezza del libro e dal modello scelto. Un libro di 300 pagine costa circa $0.02-0.15 con GPT-4.1 o $0.03-0.30 con Claude Sonnet 4. I modelli economici come GPT-4.1 Nano possono costare meno di $0.01."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "Qual e il modello migliore per tradurre?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "Consigliamo GPT-4.1 per OpenAI e Claude Sonnet 4 per Anthropic. Offrono il miglior rapporto qualita/prezzo per la traduzione di libri e documenti."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "La traduzione mantiene la formattazione?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "Si, il layout originale, le immagini, i titoli e la struttura del documento vengono preservati. Il file tradotto mantiene lo stesso formato (PDF o EPUB) dell'originale."
+                }
+            }
+        ]
+    }
+    </script>
+
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
@@ -39,9 +115,16 @@
                 <span class="title-line">ULTIMATE</span>
                 <span class="title-line accent">TRANSLATOR</span>
             </h1>
-            <p class="hero-subtitle">Il traduttore AI definitivo per EPUB e PDF</p>
-            <p class="hero-description">Traduzioni di qualita letteraria con i migliori modelli AI. Scegli tra OpenAI e Anthropic per il risultato perfetto.</p>
+            <p class="hero-subtitle">Traduzione AI di PDF e EPUB con ChatGPT e Claude</p>
+            <p class="hero-transparency">Zero markup &mdash; paghi solo il costo API di OpenAI o Anthropic</p>
+            <p class="hero-description">Traduci libri e documenti con intelligenza artificiale. Scegli tra i modelli OpenAI e Anthropic per traduzione automatica PDF e EPUB di qualita letteraria.</p>
         </header>
+
+        <!-- Transparency Info Box -->
+        <div class="transparency-box">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+            <p><strong>Come funziona:</strong> Il tuo file viene analizzato, tradotto usando l'API che scegli, e restituito. Paghi solo il costo dei token utilizzati direttamente a OpenAI o Anthropic. Nessun ricarico.</p>
+        </div>
 
         <!-- Main Card with animated border -->
         <div class="main-card-wrapper">
@@ -94,14 +177,41 @@
                     <span id="detect-badge-text">Rilevamento lingua...</span>
                 </div>
 
+                <!-- File Analysis Badge -->
+                <div class="analyze-badge" id="analyze-badge">
+                    <div class="analyze-badge-pulse"></div>
+                    <svg class="spinner-svg" width="16" height="16" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none" stroke-dasharray="31.4 31.4" stroke-linecap="round"/></svg>
+                    <span id="analyze-badge-text">Analisi file in corso...</span>
+                </div>
+
+                <!-- File Stats (shown after analysis) -->
+                <div class="file-stats" id="file-stats">
+                    <div class="file-stat">
+                        <span class="file-stat-label">Caratteri</span>
+                        <span class="file-stat-value" id="stat-chars">-</span>
+                    </div>
+                    <div class="file-stat">
+                        <span class="file-stat-label">Parole</span>
+                        <span class="file-stat-value" id="stat-words">-</span>
+                    </div>
+                    <div class="file-stat">
+                        <span class="file-stat-label" id="stat-pages-label">Pagine</span>
+                        <span class="file-stat-value" id="stat-pages">-</span>
+                    </div>
+                    <div class="file-stat">
+                        <span class="file-stat-label">Token stimati</span>
+                        <span class="file-stat-value" id="stat-tokens">-</span>
+                    </div>
+                </div>
+
                 <!-- Divider -->
                 <div class="section-divider"></div>
 
                 <!-- Language Selection -->
-                <div class="section-label">
+                <h2 class="section-label">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
                     <span>Scegli le lingue</span>
-                </div>
+                </h2>
 
                 <div class="lang-row">
                     <div class="lang-group">
@@ -174,97 +284,38 @@
                 <!-- Divider -->
                 <div class="section-divider"></div>
 
-                <!-- Model Selector Section -->
-                <div class="section-label">
+                <!-- Model Selector Section - Two Column Layout -->
+                <h2 class="section-label">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
                     <span>Scegli il modello AI</span>
-                </div>
+                </h2>
+
+                <p class="model-transparency-note">I prezzi mostrati sono il costo diretto delle API. Nessun ricarico.</p>
 
                 <div class="model-selector" id="model-selector">
                     <div class="model-loading" id="model-loading">
                         <svg class="spinner-svg" width="22" height="22" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none" stroke-dasharray="31.4 31.4" stroke-linecap="round"/></svg>
                         <span>Caricamento modelli...</span>
                     </div>
-                    <div class="model-grid" id="model-grid"></div>
+                    <div class="model-columns" id="model-columns"></div>
                     <div class="no-models-warning" id="no-models-warning" style="display:none;">
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
                         <span>Nessuna chiave API configurata. Modifica il file <strong>.env</strong> per aggiungere le tue chiavi API.</span>
                     </div>
                 </div>
 
-                <!-- Analyze & Estimate Button -->
-                <button class="translate-btn analyze-btn" id="analyze-btn" disabled>
-                    <span class="translate-btn-content" id="analyze-btn-content">
-                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
-                        <span>ANALIZZA E STIMA COSTO</span>
+                <!-- Translate Button -->
+                <button class="translate-btn" id="translate-btn" disabled>
+                    <span class="translate-btn-content" id="translate-btn-content">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                        <span>TRADUCI</span>
                     </span>
-                    <span class="translate-btn-spinner" id="analyze-btn-spinner">
+                    <span class="translate-btn-spinner" id="translate-btn-spinner">
                         <svg class="spinner-svg" width="22" height="22" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none" stroke-dasharray="31.4 31.4" stroke-linecap="round"/></svg>
-                        <span>Analisi in corso...</span>
+                        <span>Avvio traduzione...</span>
                     </span>
                 </button>
 
-            </div>
-        </div>
-
-        <!-- Cost Estimation Panel -->
-        <div class="cost-panel" id="cost-panel">
-            <div class="cost-panel-header">
-                <div class="cost-panel-title">
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-                    Stima dei costi
-                </div>
-            </div>
-
-            <div class="cost-grid">
-                <div class="cost-stat-card">
-                    <div class="cost-stat-label">Caratteri</div>
-                    <div class="cost-stat-value" id="cost-chars">-</div>
-                </div>
-                <div class="cost-stat-card">
-                    <div class="cost-stat-label">Parole</div>
-                    <div class="cost-stat-value" id="cost-words">-</div>
-                </div>
-                <div class="cost-stat-card">
-                    <div class="cost-stat-label" id="cost-pages-label">Pagine</div>
-                    <div class="cost-stat-value" id="cost-pages">-</div>
-                </div>
-                <div class="cost-stat-card">
-                    <div class="cost-stat-label">Token stimati (input)</div>
-                    <div class="cost-stat-value" id="cost-input-tokens">-</div>
-                </div>
-            </div>
-
-            <div class="cost-model-row">
-                <div class="cost-model-info">
-                    <span class="cost-model-label">Modello:</span>
-                    <span class="cost-model-name" id="cost-model-name">-</span>
-                </div>
-                <div class="cost-model-info">
-                    <span class="cost-model-label">Token output stimati:</span>
-                    <span class="cost-model-name" id="cost-output-tokens">-</span>
-                </div>
-            </div>
-
-            <div class="cost-total-card">
-                <div class="cost-total-label">Costo totale stimato</div>
-                <div class="cost-total-value" id="cost-total">$0.00</div>
-                <div class="cost-total-breakdown">
-                    <span>Input: <strong id="cost-input-usd">$0.00</strong></span>
-                    <span class="cost-sep">+</span>
-                    <span>Output: <strong id="cost-output-usd">$0.00</strong></span>
-                </div>
-            </div>
-
-            <div class="cost-actions">
-                <button class="cost-back-btn" id="cost-back-btn">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
-                    Modifica impostazioni
-                </button>
-                <button class="translate-btn cost-proceed-btn" id="cost-proceed-btn">
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-                    <span>PROCEDI CON LA TRADUZIONE</span>
-                </button>
             </div>
         </div>
 
@@ -324,6 +375,116 @@
             </button>
         </div>
 
+        <!-- FAQ Section -->
+        <section class="faq-section" id="faq">
+            <h2 class="faq-title">Domande Frequenti</h2>
+            <p class="faq-subtitle">Tutto quello che devi sapere sulla traduzione AI di PDF e EPUB</p>
+
+            <div class="faq-list">
+                <div class="faq-item">
+                    <button class="faq-question" aria-expanded="false">
+                        <span>Quanto costa tradurre un libro?</span>
+                        <svg class="faq-chevron" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+                    <div class="faq-answer">
+                        <p>Il costo dipende dalla lunghezza del testo e dal modello AI scelto. Ecco alcune stime per un libro di circa 300 pagine (~80.000 parole):</p>
+                        <ul>
+                            <li><strong>GPT-4.1 (consigliato OpenAI):</strong> circa $0.02 - $0.15</li>
+                            <li><strong>Claude Sonnet 4 (consigliato Anthropic):</strong> circa $0.03 - $0.30</li>
+                            <li><strong>GPT-4.1 Nano (ultra economico):</strong> meno di $0.01</li>
+                            <li><strong>Claude Opus 4 (massima qualita):</strong> circa $0.50 - $2.00</li>
+                        </ul>
+                        <p>Carica il tuo file per vedere il costo stimato esatto per ogni modello.</p>
+                    </div>
+                </div>
+
+                <div class="faq-item">
+                    <button class="faq-question" aria-expanded="false">
+                        <span>Qual e il modello migliore per tradurre?</span>
+                        <svg class="faq-chevron" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+                    <div class="faq-answer">
+                        <p>Dipende dalle tue esigenze:</p>
+                        <ul>
+                            <li><strong>Per la migliore qualita:</strong> Claude Opus 4 o GPT-5.2 offrono traduzioni di livello letterario, ideali per narrativa e testi complessi.</li>
+                            <li><strong>Miglior rapporto qualita/prezzo:</strong> GPT-4.1 e Claude Sonnet 4 sono eccellenti per la maggior parte dei libri e documenti.</li>
+                            <li><strong>Per risparmiare:</strong> GPT-4.1 Mini o Nano sono ottimi per bozze o testi semplici.</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="faq-item">
+                    <button class="faq-question" aria-expanded="false">
+                        <span>Quale modello consigliate?</span>
+                        <svg class="faq-chevron" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+                    <div class="faq-answer">
+                        <p>I nostri consigli:</p>
+                        <ul>
+                            <li><strong>OpenAI:</strong> GPT-4.1 &mdash; offre il miglior rapporto qualita/prezzo. Ottimo per libri, documenti tecnici e testi generali.</li>
+                            <li><strong>Anthropic:</strong> Claude Sonnet 4 &mdash; perfetto equilibrio tra qualita, velocita e prezzo. Eccellente per traduzioni fluide e naturali.</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="faq-item">
+                    <button class="faq-question" aria-expanded="false">
+                        <span>La traduzione mantiene la formattazione?</span>
+                        <svg class="faq-chevron" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+                    <div class="faq-answer">
+                        <p>Si! La formattazione originale viene preservata: immagini, layout, titoli, capitoli, grassetto, corsivo e struttura del documento. Il file tradotto mantiene lo stesso formato (PDF o EPUB) dell'originale, pronto per essere letto sul tuo dispositivo preferito.</p>
+                    </div>
+                </div>
+
+                <div class="faq-item">
+                    <button class="faq-question" aria-expanded="false">
+                        <span>Quanto tempo ci vuole per tradurre un libro?</span>
+                        <svg class="faq-chevron" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+                    <div class="faq-answer">
+                        <p>Il tempo dipende dalla lunghezza del libro e dal modello scelto. In generale:</p>
+                        <ul>
+                            <li><strong>Documento breve (10-50 pagine):</strong> 1-5 minuti</li>
+                            <li><strong>Libro medio (200-400 pagine):</strong> 5-15 minuti</li>
+                            <li><strong>Libro lungo (500+ pagine):</strong> 15-30 minuti</li>
+                        </ul>
+                        <p>I modelli piu veloci (Haiku, GPT-4.1 Mini/Nano) completano la traduzione in meno tempo.</p>
+                    </div>
+                </div>
+
+                <div class="faq-item">
+                    <button class="faq-question" aria-expanded="false">
+                        <span>I miei dati sono al sicuro?</span>
+                        <svg class="faq-chevron" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+                    <div class="faq-answer">
+                        <p>Assolutamente si. I tuoi file vengono processati localmente e inviati alle API di OpenAI o Anthropic solo per la traduzione. Dopo il completamento, i file vengono eliminati dal server. Non conserviamo copie dei tuoi documenti e non condividiamo i tuoi dati con terze parti.</p>
+                    </div>
+                </div>
+
+                <div class="faq-item">
+                    <button class="faq-question" aria-expanded="false">
+                        <span>Posso tradurre in qualsiasi lingua?</span>
+                        <svg class="faq-chevron" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+                    <div class="faq-answer">
+                        <p>Si! Supportiamo oltre 25 lingue tra cui: italiano, inglese, francese, tedesco, spagnolo, portoghese, olandese, russo, cinese, giapponese, coreano, arabo, polacco, svedese, norvegese, danese, finlandese, ceco, turco, hindi, greco, romeno, ungherese, tailandese e vietnamita.</p>
+                    </div>
+                </div>
+
+                <div class="faq-item">
+                    <button class="faq-question" aria-expanded="false">
+                        <span>Perche non c'e markup sul prezzo?</span>
+                        <svg class="faq-chevron" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+                    <div class="faq-answer">
+                        <p>Crediamo nella trasparenza. ULTIMATE TRANSLATOR e uno strumento open che ti permette di utilizzare le API di OpenAI e Anthropic direttamente. Il costo che vedi e esattamente quello che paghi al provider (OpenAI o Anthropic) per i token utilizzati. Non aggiungiamo nessun ricarico o commissione. Paghi le tue chiavi API direttamente ai provider.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
         <!-- Footer -->
         <footer class="footer">
             <div class="footer-content">
@@ -331,16 +492,43 @@
                 <span class="footer-divider"></span>
                 <span class="footer-powered">Powered by OpenAI + Anthropic</span>
             </div>
+            <p class="footer-seo">Traduzione AI di PDF e EPUB &mdash; Traduci libri con intelligenza artificiale usando ChatGPT e Claude</p>
         </footer>
     </div>
 
     <script>
     // =========================================================================
-    // INLINE SVG LOGOS
+    // INLINE SVG LOGOS (large versions for column headers)
     // =========================================================================
-    const OPENAI_LOGO_SVG = `<svg class="provider-logo" viewBox="0 0 24 24" fill="currentColor" width="20" height="20"><path d="M22.282 9.821a5.985 5.985 0 0 0-.516-4.91 6.046 6.046 0 0 0-6.51-2.9A6.065 6.065 0 0 0 4.981 4.18a5.985 5.985 0 0 0-3.998 2.9 6.046 6.046 0 0 0 .743 7.097 5.98 5.98 0 0 0 .51 4.911 6.051 6.051 0 0 0 6.515 2.9A5.985 5.985 0 0 0 13.26 24a6.056 6.056 0 0 0 5.772-4.206 5.99 5.99 0 0 0 3.997-2.9 6.056 6.056 0 0 0-.747-7.073zM13.26 22.43a4.476 4.476 0 0 1-2.876-1.04l.141-.081 4.779-2.758a.795.795 0 0 0 .392-.681v-6.737l2.02 1.168a.071.071 0 0 1 .038.052v5.583a4.504 4.504 0 0 1-4.494 4.494zM3.6 18.304a4.47 4.47 0 0 1-.535-3.014l.142.085 4.783 2.759a.771.771 0 0 0 .78 0l5.843-3.369v2.332a.08.08 0 0 1-.033.062L9.74 19.95a4.5 4.5 0 0 1-6.14-1.646zM2.34 7.896a4.485 4.485 0 0 1 2.366-1.973V11.6a.766.766 0 0 0 .388.676l5.815 3.355-2.02 1.168a.076.076 0 0 1-.071 0l-4.83-2.786A4.504 4.504 0 0 1 2.34 7.872zm16.597 3.855l-5.833-3.387L15.119 7.2a.076.076 0 0 1 .071 0l4.83 2.791a4.494 4.494 0 0 1-.676 8.105v-5.678a.79.79 0 0 0-.407-.667zm2.01-3.023l-.141-.085-4.774-2.782a.776.776 0 0 0-.785 0L9.409 9.23V6.897a.066.066 0 0 1 .028-.061l4.83-2.787a4.5 4.5 0 0 1 6.68 4.66zm-12.64 4.135l-2.02-1.164a.08.08 0 0 1-.038-.057V6.075a4.5 4.5 0 0 1 7.375-3.453l-.142.08L8.704 5.46a.795.795 0 0 0-.393.681zm1.097-2.365l2.602-1.5 2.607 1.5v2.999l-2.597 1.5-2.607-1.5z"/></svg>`;
+    const OPENAI_LOGO_SVG = `<svg viewBox="0 0 24 24" fill="currentColor" width="40" height="40"><path d="M22.282 9.821a5.985 5.985 0 0 0-.516-4.91 6.046 6.046 0 0 0-6.51-2.9A6.065 6.065 0 0 0 4.981 4.18a5.985 5.985 0 0 0-3.998 2.9 6.046 6.046 0 0 0 .743 7.097 5.98 5.98 0 0 0 .51 4.911 6.051 6.051 0 0 0 6.515 2.9A5.985 5.985 0 0 0 13.26 24a6.056 6.056 0 0 0 5.772-4.206 5.99 5.99 0 0 0 3.997-2.9 6.056 6.056 0 0 0-.747-7.073zM13.26 22.43a4.476 4.476 0 0 1-2.876-1.04l.141-.081 4.779-2.758a.795.795 0 0 0 .392-.681v-6.737l2.02 1.168a.071.071 0 0 1 .038.052v5.583a4.504 4.504 0 0 1-4.494 4.494zM3.6 18.304a4.47 4.47 0 0 1-.535-3.014l.142.085 4.783 2.759a.771.771 0 0 0 .78 0l5.843-3.369v2.332a.08.08 0 0 1-.033.062L9.74 19.95a4.5 4.5 0 0 1-6.14-1.646zM2.34 7.896a4.485 4.485 0 0 1 2.366-1.973V11.6a.766.766 0 0 0 .388.676l5.815 3.355-2.02 1.168a.076.076 0 0 1-.071 0l-4.83-2.786A4.504 4.504 0 0 1 2.34 7.872zm16.597 3.855l-5.833-3.387L15.119 7.2a.076.076 0 0 1 .071 0l4.83 2.791a4.494 4.494 0 0 1-.676 8.105v-5.678a.79.79 0 0 0-.407-.667zm2.01-3.023l-.141-.085-4.774-2.782a.776.776 0 0 0-.785 0L9.409 9.23V6.897a.066.066 0 0 1 .028-.061l4.83-2.787a4.5 4.5 0 0 1 6.68 4.66zm-12.64 4.135l-2.02-1.164a.08.08 0 0 1-.038-.057V6.075a4.5 4.5 0 0 1 7.375-3.453l-.142.08L8.704 5.46a.795.795 0 0 0-.393.681zm1.097-2.365l2.602-1.5 2.607 1.5v2.999l-2.597 1.5-2.607-1.5z"/></svg>`;
 
-    const ANTHROPIC_LOGO_SVG = `<svg class="provider-logo" viewBox="0 0 24 24" fill="currentColor" width="20" height="20"><path d="M13.827 3.52h3.603L24 20.48h-3.603l-6.57-16.96zm-7.258 0h3.767L16.906 20.48h-3.674l-1.343-3.461H5.017l-1.344 3.46H.001l6.568-16.96zm2.327 5.14L6.769 14.26h4.254l-2.127-5.6z"/></svg>`;
+    const ANTHROPIC_LOGO_SVG = `<svg viewBox="0 0 24 24" fill="currentColor" width="40" height="40"><path d="M13.827 3.52h3.603L24 20.48h-3.603l-6.57-16.96zm-7.258 0h3.767L16.906 20.48h-3.674l-1.343-3.461H5.017l-1.344 3.46H.001l6.568-16.96zm2.327 5.14L6.769 14.26h4.254l-2.127-5.6z"/></svg>`;
+
+    const OPENAI_LOGO_SMALL = `<svg class="provider-logo" viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><path d="M22.282 9.821a5.985 5.985 0 0 0-.516-4.91 6.046 6.046 0 0 0-6.51-2.9A6.065 6.065 0 0 0 4.981 4.18a5.985 5.985 0 0 0-3.998 2.9 6.046 6.046 0 0 0 .743 7.097 5.98 5.98 0 0 0 .51 4.911 6.051 6.051 0 0 0 6.515 2.9A5.985 5.985 0 0 0 13.26 24a6.056 6.056 0 0 0 5.772-4.206 5.99 5.99 0 0 0 3.997-2.9 6.056 6.056 0 0 0-.747-7.073zM13.26 22.43a4.476 4.476 0 0 1-2.876-1.04l.141-.081 4.779-2.758a.795.795 0 0 0 .392-.681v-6.737l2.02 1.168a.071.071 0 0 1 .038.052v5.583a4.504 4.504 0 0 1-4.494 4.494zM3.6 18.304a4.47 4.47 0 0 1-.535-3.014l.142.085 4.783 2.759a.771.771 0 0 0 .78 0l5.843-3.369v2.332a.08.08 0 0 1-.033.062L9.74 19.95a4.5 4.5 0 0 1-6.14-1.646zM2.34 7.896a4.485 4.485 0 0 1 2.366-1.973V11.6a.766.766 0 0 0 .388.676l5.815 3.355-2.02 1.168a.076.076 0 0 1-.071 0l-4.83-2.786A4.504 4.504 0 0 1 2.34 7.872zm16.597 3.855l-5.833-3.387L15.119 7.2a.076.076 0 0 1 .071 0l4.83 2.791a4.494 4.494 0 0 1-.676 8.105v-5.678a.79.79 0 0 0-.407-.667zm2.01-3.023l-.141-.085-4.774-2.782a.776.776 0 0 0-.785 0L9.409 9.23V6.897a.066.066 0 0 1 .028-.061l4.83-2.787a4.5 4.5 0 0 1 6.68 4.66zm-12.64 4.135l-2.02-1.164a.08.08 0 0 1-.038-.057V6.075a4.5 4.5 0 0 1 7.375-3.453l-.142.08L8.704 5.46a.795.795 0 0 0-.393.681zm1.097-2.365l2.602-1.5 2.607 1.5v2.999l-2.597 1.5-2.607-1.5z"/></svg>`;
+
+    const ANTHROPIC_LOGO_SMALL = `<svg class="provider-logo" viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><path d="M13.827 3.52h3.603L24 20.48h-3.603l-6.57-16.96zm-7.258 0h3.767L16.906 20.48h-3.674l-1.343-3.461H5.017l-1.344 3.46H.001l6.568-16.96zm2.327 5.14L6.769 14.26h4.254l-2.127-5.6z"/></svg>`;
+
+    // =========================================================================
+    // MODEL DESCRIPTIONS (detailed)
+    // =========================================================================
+    const MODEL_DESCRIPTIONS = {
+        'gpt-5.2': 'Il piu avanzato di OpenAI. Traduzioni di altissima qualita.',
+        'gpt-4.1': 'Miglior rapporto qualita/prezzo. Ottimo per libri.',
+        'gpt-4.1-mini': 'Economico e veloce. Buono per testi semplici.',
+        'gpt-4.1-nano': 'Ultra economico. Per traduzioni rapide di bozze.',
+        'gpt-4o': 'Modello multimodale affidabile e collaudato.',
+        'gpt-4o-mini': 'Molto economico. Per grandi volumi.',
+        'o4-mini': 'Modello di ragionamento. Non ideale per traduzione.',
+        'o3': 'Modello di ragionamento. Non ideale per traduzione.',
+        'o3-mini': 'Modello di ragionamento. Non ideale per traduzione.',
+        'o1': 'Modello di ragionamento. Non ideale per traduzione.',
+        'claude-opus-4-20250514': 'Il piu potente. Qualita letteraria eccezionale.',
+        'claude-sonnet-4-20250514': 'Perfetto equilibrio qualita/velocita/prezzo.',
+        'claude-haiku-3-5-20241022': 'Velocissimo e economico. Buono per testi brevi.',
+    };
+
+    // Models that get the CONSIGLIATO badge
+    const RECOMMENDED_MODELS = ['gpt-4.1', 'claude-sonnet-4-20250514'];
 
     // =========================================================================
     // PARTICLE BACKGROUND
@@ -429,16 +617,15 @@
     const fileCardName = document.getElementById('file-card-name');
     const fileCardSize = document.getElementById('file-card-size');
     const fileCardType = document.getElementById('file-card-type');
-    const fileCardIcon = document.getElementById('file-card-icon');
     const fileCardRemove = document.getElementById('file-card-remove');
     const detectBadge = document.getElementById('detect-badge');
     const detectBadgeText = document.getElementById('detect-badge-text');
-    const analyzeBtn = document.getElementById('analyze-btn');
-    const analyzeBtnContent = document.getElementById('analyze-btn-content');
-    const analyzeBtnSpinner = document.getElementById('analyze-btn-spinner');
-    const costPanel = document.getElementById('cost-panel');
-    const costBackBtn = document.getElementById('cost-back-btn');
-    const costProceedBtn = document.getElementById('cost-proceed-btn');
+    const analyzeBadge = document.getElementById('analyze-badge');
+    const analyzeBadgeText = document.getElementById('analyze-badge-text');
+    const fileStats = document.getElementById('file-stats');
+    const translateBtn = document.getElementById('translate-btn');
+    const translateBtnContent = document.getElementById('translate-btn-content');
+    const translateBtnSpinner = document.getElementById('translate-btn-spinner');
     const progressSection = document.getElementById('progress-section');
     const progressBar = document.getElementById('progress-bar');
     const progressBarGlow = document.getElementById('progress-bar-glow');
@@ -454,7 +641,7 @@
     const swapBtn = document.getElementById('swap-btn');
     const sourceLang = document.getElementById('source-lang');
     const targetLang = document.getElementById('target-lang');
-    const modelGrid = document.getElementById('model-grid');
+    const modelColumns = document.getElementById('model-columns');
     const modelLoading = document.getElementById('model-loading');
     const noModelsWarning = document.getElementById('no-models-warning');
 
@@ -473,8 +660,8 @@
             // Update API status bar
             updateApiStatusBar(apiStatus);
 
-            // Build model cards
-            modelGrid.innerHTML = '';
+            // Build model columns
+            modelColumns.innerHTML = '';
             modelLoading.style.display = 'none';
 
             if (availableModels.length === 0) {
@@ -489,23 +676,30 @@
                 grouped[m.provider].push(m);
             }
 
-            // Render Anthropic first, then OpenAI
-            const providerOrder = ['anthropic', 'openai'];
-            const providerNames = { anthropic: 'Anthropic (Claude)', openai: 'OpenAI' };
+            // Render two columns: OpenAI left, Anthropic right
+            const providerOrder = ['openai', 'anthropic'];
+            const providerNames = { openai: 'OpenAI', anthropic: 'Anthropic' };
 
             for (const prov of providerOrder) {
                 if (!grouped[prov]) continue;
 
+                const column = document.createElement('div');
+                column.className = 'model-column';
+
+                // Column header with large logo
                 const header = document.createElement('div');
-                header.className = 'model-provider-header';
+                header.className = 'model-column-header ' + prov;
                 header.innerHTML = `
-                    <div class="provider-logo-wrapper ${prov}">
+                    <div class="model-column-logo ${prov}">
                         ${prov === 'openai' ? OPENAI_LOGO_SVG : ANTHROPIC_LOGO_SVG}
                     </div>
-                    <span>${providerNames[prov]}</span>
-                    <span class="provider-count">${grouped[prov].length} modelli</span>
+                    <div class="model-column-provider">${providerNames[prov]}</div>
                 `;
-                modelGrid.appendChild(header);
+                column.appendChild(header);
+
+                // Model cards
+                const cardList = document.createElement('div');
+                cardList.className = 'model-card-list';
 
                 for (const m of grouped[prov]) {
                     const card = document.createElement('div');
@@ -519,15 +713,8 @@
                         selectedProvider = m.provider;
                     }
 
-                    // Speed indicator
-                    let speedDots = 2;
-                    if (m.speed === 'very_fast') { speedDots = 3; }
-                    else if (m.speed === 'fast') { speedDots = 3; }
-                    else if (m.speed === 'slow') { speedDots = 1; }
-
-                    const speedDotsHtml = Array.from({length: 3}, (_, i) =>
-                        `<span class="speed-dot ${i < speedDots ? 'active' : ''}"></span>`
-                    ).join('');
+                    const isRecommended = RECOMMENDED_MODELS.includes(m.id);
+                    const description = MODEL_DESCRIPTIONS[m.id] || m.description || '';
 
                     // Quality stars
                     let qualityStars = 3;
@@ -540,49 +727,42 @@
                         `<span class="quality-star ${i < qualityStars ? 'active' : ''}">&#9733;</span>`
                     ).join('');
 
-                    // Cost per dollar signs
-                    const costLen = m.cost_indicator.length;
-                    const dollarsHtml = Array.from({length: 4}, (_, i) =>
-                        `<span class="dollar-sign ${i < costLen ? 'active' : ''}">$</span>`
-                    ).join('');
+                    // Speed indicator
+                    let speedIcon = '';
+                    if (m.speed === 'very_fast' || m.speed === 'fast') {
+                        speedIcon = '<span class="speed-indicator fast">&#9889;</span>';
+                    } else {
+                        speedIcon = '<span class="speed-indicator slow">&#9201;</span>';
+                    }
 
                     card.innerHTML = `
-                        <div class="model-card-top">
-                            <div class="model-card-logo ${m.provider}">
-                                ${m.provider === 'openai' ? OPENAI_LOGO_SVG : ANTHROPIC_LOGO_SVG}
-                            </div>
-                            <div class="model-card-badge quality-${m.quality}">${m.quality_badge}</div>
-                        </div>
-                        <div class="model-card-name">${m.display_name}</div>
-                        <div class="model-card-desc">${m.description || ''}</div>
-                        <div class="model-card-meta">
-                            <div class="model-meta-item">
-                                <span class="model-meta-label">Qualita</span>
+                        ${isRecommended ? '<div class="recommended-badge">CONSIGLIATO</div>' : ''}
+                        <div class="model-card-header">
+                            <div class="model-card-name-row">
                                 <div class="quality-stars">${starsHtml}</div>
+                                ${speedIcon}
+                                <span class="model-card-name">${m.display_name}</span>
                             </div>
-                            <div class="model-meta-item">
-                                <span class="model-meta-label">Velocita</span>
-                                <div class="speed-dots">${speedDotsHtml}</div>
-                            </div>
-                            <div class="model-meta-item">
-                                <span class="model-meta-label">Costo</span>
-                                <div class="dollar-signs">${dollarsHtml}</div>
+                            <div class="model-card-check">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
                             </div>
                         </div>
-                        <div class="model-card-pricing">
-                            <span>$${m.input_cost.toFixed(2)} / $${m.output_cost.toFixed(2)} per 1M tok</span>
-                        </div>
-                        <div class="model-card-check">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+                        <div class="model-card-desc">${description}</div>
+                        <div class="model-card-price" data-model-id="${m.id}">
+                            <span class="price-per-token">$${m.input_cost.toFixed(2)} / $${m.output_cost.toFixed(2)} per 1M tok</span>
+                            <span class="price-estimate" id="price-${m.id}"></span>
                         </div>
                     `;
 
                     card.addEventListener('click', () => selectModel(m.id, m.provider));
-                    modelGrid.appendChild(card);
+                    cardList.appendChild(card);
                 }
+
+                column.appendChild(cardList);
+                modelColumns.appendChild(column);
             }
 
-            updateAnalyzeButton();
+            updateTranslateButton();
 
         } catch (err) {
             console.error('Failed to load models:', err);
@@ -599,12 +779,7 @@
         const card = document.querySelector(`.model-card[data-model-id="${modelId}"]`);
         if (card) card.classList.add('selected');
 
-        updateAnalyzeButton();
-
-        // If cost panel is visible, recalculate
-        if (costPanel.classList.contains('visible') && fileAnalysis) {
-            recalculateCost();
-        }
+        updateTranslateButton();
     }
 
     function updateApiStatusBar(status) {
@@ -621,8 +796,8 @@
         }
     }
 
-    function updateAnalyzeButton() {
-        analyzeBtn.disabled = !(selectedFile && selectedModel);
+    function updateTranslateButton() {
+        translateBtn.disabled = !(selectedFile && selectedModel && fileAnalysis);
     }
 
     // Load models when page opens
@@ -683,10 +858,19 @@
         downloadSection.classList.remove('visible');
         errorSection.classList.remove('visible');
         progressSection.classList.remove('visible');
-        costPanel.classList.remove('visible');
+        fileStats.classList.remove('visible');
 
-        updateAnalyzeButton();
+        // Clear old price estimates
+        document.querySelectorAll('.price-estimate').forEach(el => {
+            el.textContent = '';
+            el.classList.remove('visible');
+        });
+
+        updateTranslateButton();
+
+        // Auto-detect language AND auto-analyze file
         detectLanguage(file);
+        analyzeFile(file);
     }
 
     function clearFile() {
@@ -695,9 +879,16 @@
         fileInput.value = '';
         fileCard.classList.remove('visible');
         uploadZone.classList.remove('has-file');
-        analyzeBtn.disabled = true;
+        translateBtn.disabled = true;
         detectBadge.classList.remove('visible', 'detected', 'detecting');
-        costPanel.classList.remove('visible');
+        analyzeBadge.classList.remove('visible', 'analyzing', 'analyzed');
+        fileStats.classList.remove('visible');
+
+        // Clear price estimates
+        document.querySelectorAll('.price-estimate').forEach(el => {
+            el.textContent = '';
+            el.classList.remove('visible');
+        });
     }
 
     function formatSize(bytes) {
@@ -748,6 +939,77 @@
     }
 
     // =========================================================================
+    // AUTO-ANALYZE FILE (no model required)
+    // =========================================================================
+    async function analyzeFile(file) {
+        analyzeBadge.classList.add('visible', 'analyzing');
+        analyzeBadge.classList.remove('analyzed');
+        analyzeBadgeText.textContent = 'Analisi file in corso...';
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        try {
+            const res = await fetch('/api/analyze', { method: 'POST', body: formData });
+            const data = await res.json();
+
+            if (!res.ok) throw new Error(data.error || 'Errore analisi');
+
+            fileAnalysis = data;
+
+            // Show file stats
+            document.getElementById('stat-chars').textContent = formatNumber(data.total_chars);
+            document.getElementById('stat-words').textContent = formatNumber(data.total_words);
+
+            if (data.file_type === 'epub') {
+                document.getElementById('stat-pages-label').textContent = 'Capitoli';
+                document.getElementById('stat-pages').textContent = formatNumber(data.num_chapters || 0);
+            } else {
+                document.getElementById('stat-pages-label').textContent = 'Pagine';
+                document.getElementById('stat-pages').textContent = formatNumber(data.num_pages || 0);
+            }
+
+            document.getElementById('stat-tokens').textContent = formatNumber(data.estimated_tokens);
+
+            analyzeBadge.classList.remove('analyzing');
+            analyzeBadge.classList.add('analyzed');
+            analyzeBadgeText.textContent = 'Analisi completata';
+            fileStats.classList.add('visible');
+
+            // Calculate costs for ALL models client-side
+            calculateAllModelCosts(data.estimated_tokens);
+
+            updateTranslateButton();
+
+            // Hide analyze badge after a moment
+            setTimeout(() => {
+                analyzeBadge.classList.remove('visible');
+            }, 2000);
+
+        } catch (err) {
+            console.error('File analysis failed:', err);
+            analyzeBadge.classList.remove('visible', 'analyzing');
+            showNotification('Errore nell\'analisi del file: ' + err.message, 'error');
+        }
+    }
+
+    function calculateAllModelCosts(inputTokens) {
+        const outputTokens = Math.round(inputTokens * 1.1);
+
+        for (const m of availableModels) {
+            const inputCost = (inputTokens / 1_000_000) * m.input_cost;
+            const outputCost = (outputTokens / 1_000_000) * m.output_cost;
+            const totalCost = inputCost + outputCost;
+
+            const priceEl = document.getElementById('price-' + m.id);
+            if (priceEl) {
+                priceEl.textContent = '$' + totalCost.toFixed(4) + ' stimato';
+                priceEl.classList.add('visible');
+            }
+        }
+    }
+
+    // =========================================================================
     // SWAP LANGUAGES
     // =========================================================================
     swapBtn.addEventListener('click', () => {
@@ -759,102 +1021,13 @@
     });
 
     // =========================================================================
-    // ANALYZE & COST ESTIMATION
+    // TRANSLATION
     // =========================================================================
-    analyzeBtn.addEventListener('click', analyzeFile);
-
-    async function analyzeFile() {
-        if (!selectedFile || !selectedModel) return;
-
-        if (sourceLang.value === targetLang.value) {
-            showNotification('Seleziona lingue diverse per la traduzione.', 'error');
-            return;
-        }
-
-        // UI: loading
-        analyzeBtn.disabled = true;
-        analyzeBtn.classList.add('loading');
-
-        const formData = new FormData();
-        formData.append('file', selectedFile);
-        formData.append('model', selectedModel);
-
-        try {
-            const res = await fetch('/api/analyze', { method: 'POST', body: formData });
-            const data = await res.json();
-
-            if (!res.ok) throw new Error(data.error || 'Errore del server');
-
-            fileAnalysis = data;
-            showCostPanel(data);
-
-        } catch (err) {
-            showNotification(err.message, 'error');
-        } finally {
-            analyzeBtn.disabled = false;
-            analyzeBtn.classList.remove('loading');
-        }
-    }
-
-    function showCostPanel(data) {
-        document.getElementById('cost-chars').textContent = formatNumber(data.total_chars);
-        document.getElementById('cost-words').textContent = formatNumber(data.total_words);
-
-        if (data.file_type === 'epub') {
-            document.getElementById('cost-pages-label').textContent = 'Capitoli';
-            document.getElementById('cost-pages').textContent = formatNumber(data.num_chapters || 0);
-        } else {
-            document.getElementById('cost-pages-label').textContent = 'Pagine';
-            document.getElementById('cost-pages').textContent = formatNumber(data.num_pages || 0);
-        }
-
-        document.getElementById('cost-input-tokens').textContent = formatNumber(data.input_tokens);
-        document.getElementById('cost-output-tokens').textContent = formatNumber(data.output_tokens);
-        document.getElementById('cost-model-name').textContent = data.model_display_name;
-        document.getElementById('cost-total').textContent = '$' + data.total_cost.toFixed(4);
-        document.getElementById('cost-input-usd').textContent = '$' + data.input_cost.toFixed(4);
-        document.getElementById('cost-output-usd').textContent = '$' + data.output_cost.toFixed(4);
-
-        costPanel.classList.add('visible');
-
-        // Scroll to cost panel
-        costPanel.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
-
-    async function recalculateCost() {
-        if (!selectedFile || !selectedModel) return;
-
-        // Re-analyze with new model
-        const formData = new FormData();
-        formData.append('file', selectedFile);
-        formData.append('model', selectedModel);
-
-        try {
-            const res = await fetch('/api/analyze', { method: 'POST', body: formData });
-            const data = await res.json();
-            if (res.ok) {
-                fileAnalysis = data;
-                showCostPanel(data);
-            }
-        } catch (err) {
-            console.error('Recalculate failed:', err);
-        }
-    }
-
-    // Cost panel navigation
-    costBackBtn.addEventListener('click', () => {
-        costPanel.classList.remove('visible');
-    });
-
-    costProceedBtn.addEventListener('click', startTranslation);
+    translateBtn.addEventListener('click', startTranslation);
     retryBtn.addEventListener('click', () => {
-        costPanel.classList.remove('visible');
         errorSection.classList.remove('visible');
     });
 
-    // =========================================================================
-    // TRANSLATION
-    // =========================================================================
     async function startTranslation() {
         if (!selectedFile || !selectedModel) return;
 
@@ -864,7 +1037,8 @@
         }
 
         // UI: loading state
-        costPanel.classList.remove('visible');
+        translateBtn.disabled = true;
+        translateBtn.classList.add('loading');
         progressSection.classList.add('visible');
         downloadSection.classList.remove('visible');
         errorSection.classList.remove('visible');
@@ -891,8 +1065,11 @@
             if (!response.ok) throw new Error(data.error || 'Errore del server');
 
             addLog('File caricato. Inizio traduzione...', 'info');
+            translateBtn.classList.remove('loading');
             pollProgress(data.task_id);
         } catch (err) {
+            translateBtn.disabled = false;
+            translateBtn.classList.remove('loading');
             showError(err.message);
         }
     }
@@ -936,12 +1113,14 @@
                     downloadBtn.download = data.output_filename || 'tradotto';
                     downloadMessage.textContent = 'File: ' + (data.output_filename || 'tradotto');
                     downloadSection.classList.add('visible');
+                    translateBtn.disabled = false;
                 }
 
                 if (data.status === 'error') {
                     clearInterval(pollInterval);
                     pollInterval = null;
                     showError(data.error || 'Errore durante la traduzione');
+                    translateBtn.disabled = false;
                 }
             } catch (err) {
                 console.error('Poll error:', err);
@@ -976,6 +1155,26 @@
             setTimeout(() => n.remove(), 300);
         }, 3000);
     }
+
+    // =========================================================================
+    // FAQ ACCORDION
+    // =========================================================================
+    document.querySelectorAll('.faq-question').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const item = btn.parentElement;
+            const isOpen = item.classList.contains('open');
+
+            // Close all
+            document.querySelectorAll('.faq-item').forEach(i => i.classList.remove('open'));
+            document.querySelectorAll('.faq-question').forEach(b => b.setAttribute('aria-expanded', 'false'));
+
+            // Toggle clicked
+            if (!isOpen) {
+                item.classList.add('open');
+                btn.setAttribute('aria-expanded', 'true');
+            }
+        });
+    });
     </script>
 </body>
 </html>
