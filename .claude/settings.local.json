@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -m venv venv)",
+      "Bash(source venv/bin/activate)",
+      "Bash(pip install:*)",
+      "Bash(chmod +x \"/Users/stefanomartini/Downloads/Traduzione file epub e pdf/run.sh\")",
+      "Bash(timeout 5 python3 app.py)",
+      "Bash(python3 -c \"from app import app; print\\(''OK - Server pronto''\\)\")",
+      "Bash(python3 -c \"from translator import MODEL_PRICING; print\\(f''{len\\(MODEL_PRICING\\)} modelli disponibili:''\\); [print\\(f''  {k}: {v[\"\"display_name\"\"]} \\({v[\"\"provider\"\"]}\\) - {v[\"\"cost_indicator\"\"]}''\\) for k,v in MODEL_PRICING.items\\(\\)]\")",
+      "Bash(python3 -c \"from app import app; print\\(''Server OK''\\)\")",
+      "Bash(lsof -ti:5001)",
+      "Bash(xargs kill:*)",
+      "Bash(lsof -ti:5000)",
+      "Bash(gh auth:*)"
+    ]
+  }
+}

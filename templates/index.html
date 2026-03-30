@@ -1,0 +1,981 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ULTIMATE TRANSLATOR - Traduttore AI per EPUB e PDF</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#127760;</text></svg>">
+</head>
+<body>
+
+    <!-- Particle canvas background -->
+    <canvas id="particle-canvas"></canvas>
+
+    <div class="container">
+
+        <!-- API Status Bar -->
+        <div class="api-status-bar" id="api-status-bar">
+            <div class="api-status-item" id="api-status-openai">
+                <span class="api-dot api-dot-disconnected"></span>
+                <span class="api-provider-name">OpenAI</span>
+                <span class="api-status-label">Non configurato</span>
+            </div>
+            <div class="api-status-divider"></div>
+            <div class="api-status-item" id="api-status-anthropic">
+                <span class="api-dot api-dot-disconnected"></span>
+                <span class="api-provider-name">Anthropic</span>
+                <span class="api-status-label">Non configurato</span>
+            </div>
+        </div>
+
+        <!-- Hero Section -->
+        <header class="hero">
+            <div class="hero-badge">AI-Powered Translation</div>
+            <h1 class="hero-title">
+                <span class="title-line">ULTIMATE</span>
+                <span class="title-line accent">TRANSLATOR</span>
+            </h1>
+            <p class="hero-subtitle">Il traduttore AI definitivo per EPUB e PDF</p>
+            <p class="hero-description">Traduzioni di qualita letteraria con i migliori modelli AI. Scegli tra OpenAI e Anthropic per il risultato perfetto.</p>
+        </header>
+
+        <!-- Main Card with animated border -->
+        <div class="main-card-wrapper">
+            <div class="animated-border"></div>
+            <div class="main-card">
+
+                <!-- Upload Section -->
+                <div class="section-label">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                    <span>Carica il tuo file</span>
+                </div>
+
+                <div class="upload-zone" id="upload-zone">
+                    <div class="upload-zone-inner">
+                        <div class="upload-icon-wrapper">
+                            <svg class="upload-icon" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                        </div>
+                        <div class="upload-text-primary">Trascina qui il tuo file</div>
+                        <div class="upload-text-secondary">oppure <span class="upload-link">clicca per selezionarlo</span></div>
+                        <div class="upload-formats">
+                            <span class="format-badge epub">EPUB</span>
+                            <span class="format-badge pdf">PDF</span>
+                            <span class="upload-size-hint">Max 100MB</span>
+                        </div>
+                    </div>
+                    <input type="file" id="file-input" accept=".epub,.pdf">
+                </div>
+
+                <!-- File Info Card (hidden initially) -->
+                <div class="file-card" id="file-card">
+                    <div class="file-card-icon" id="file-card-icon">
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                    </div>
+                    <div class="file-card-info">
+                        <div class="file-card-name" id="file-card-name">-</div>
+                        <div class="file-card-meta">
+                            <span class="file-card-size" id="file-card-size">-</span>
+                            <span class="file-card-type" id="file-card-type">-</span>
+                        </div>
+                    </div>
+                    <button class="file-card-remove" id="file-card-remove" title="Rimuovi file">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                    </button>
+                </div>
+
+                <!-- Language Detection Badge -->
+                <div class="detect-badge" id="detect-badge">
+                    <div class="detect-badge-pulse"></div>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                    <span id="detect-badge-text">Rilevamento lingua...</span>
+                </div>
+
+                <!-- Divider -->
+                <div class="section-divider"></div>
+
+                <!-- Language Selection -->
+                <div class="section-label">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                    <span>Scegli le lingue</span>
+                </div>
+
+                <div class="lang-row">
+                    <div class="lang-group">
+                        <label class="lang-label" for="source-lang">Da</label>
+                        <select id="source-lang" class="lang-select">
+                            <option value="English" selected>English</option>
+                            <option value="Italian">Italiano</option>
+                            <option value="French">Fran&ccedil;ais</option>
+                            <option value="German">Deutsch</option>
+                            <option value="Spanish">Espa&ntilde;ol</option>
+                            <option value="Portuguese">Portugu&ecirc;s</option>
+                            <option value="Dutch">Nederlands</option>
+                            <option value="Russian">&#1056;&#1091;&#1089;&#1089;&#1082;&#1080;&#1081;</option>
+                            <option value="Chinese">&#20013;&#25991;</option>
+                            <option value="Japanese">&#26085;&#26412;&#35486;</option>
+                            <option value="Korean">&#54620;&#44397;&#50612;</option>
+                            <option value="Arabic">&#1575;&#1604;&#1593;&#1585;&#1576;&#1610;&#1577;</option>
+                            <option value="Polish">Polski</option>
+                            <option value="Swedish">Svenska</option>
+                            <option value="Norwegian">Norsk</option>
+                            <option value="Danish">Dansk</option>
+                            <option value="Finnish">Suomi</option>
+                            <option value="Czech">&#268;e&#353;tina</option>
+                            <option value="Turkish">T&uuml;rk&ccedil;e</option>
+                            <option value="Hindi">&#2361;&#2367;&#2344;&#2381;&#2342;&#2368;</option>
+                            <option value="Greek">&#917;&#955;&#955;&#951;&#957;&#953;&#954;&#940;</option>
+                            <option value="Romanian">Rom&acirc;n&#259;</option>
+                            <option value="Hungarian">Magyar</option>
+                            <option value="Thai">&#3652;&#3607;&#3618;</option>
+                            <option value="Vietnamese">Ti&#7871;ng Vi&#7879;t</option>
+                        </select>
+                    </div>
+
+                    <button class="swap-btn" id="swap-btn" title="Inverti lingue">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 16 3 12 7 8"/><line x1="21" y1="12" x2="3" y2="12"/><polyline points="17 8 21 12 17 16"/></svg>
+                    </button>
+
+                    <div class="lang-group">
+                        <label class="lang-label" for="target-lang">A</label>
+                        <select id="target-lang" class="lang-select">
+                            <option value="English">English</option>
+                            <option value="Italian" selected>Italiano</option>
+                            <option value="French">Fran&ccedil;ais</option>
+                            <option value="German">Deutsch</option>
+                            <option value="Spanish">Espa&ntilde;ol</option>
+                            <option value="Portuguese">Portugu&ecirc;s</option>
+                            <option value="Dutch">Nederlands</option>
+                            <option value="Russian">&#1056;&#1091;&#1089;&#1089;&#1082;&#1080;&#1081;</option>
+                            <option value="Chinese">&#20013;&#25991;</option>
+                            <option value="Japanese">&#26085;&#26412;&#35486;</option>
+                            <option value="Korean">&#54620;&#44397;&#50612;</option>
+                            <option value="Arabic">&#1575;&#1604;&#1593;&#1585;&#1576;&#1610;&#1577;</option>
+                            <option value="Polish">Polski</option>
+                            <option value="Swedish">Svenska</option>
+                            <option value="Norwegian">Norsk</option>
+                            <option value="Danish">Dansk</option>
+                            <option value="Finnish">Suomi</option>
+                            <option value="Czech">&#268;e&#353;tina</option>
+                            <option value="Turkish">T&uuml;rk&ccedil;e</option>
+                            <option value="Hindi">&#2361;&#2367;&#2344;&#2381;&#2342;&#2368;</option>
+                            <option value="Greek">&#917;&#955;&#955;&#951;&#957;&#953;&#954;&#940;</option>
+                            <option value="Romanian">Rom&acirc;n&#259;</option>
+                            <option value="Hungarian">Magyar</option>
+                            <option value="Thai">&#3652;&#3607;&#3618;</option>
+                            <option value="Vietnamese">Ti&#7871;ng Vi&#7879;t</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Divider -->
+                <div class="section-divider"></div>
+
+                <!-- Model Selector Section -->
+                <div class="section-label">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+                    <span>Scegli il modello AI</span>
+                </div>
+
+                <div class="model-selector" id="model-selector">
+                    <div class="model-loading" id="model-loading">
+                        <svg class="spinner-svg" width="22" height="22" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none" stroke-dasharray="31.4 31.4" stroke-linecap="round"/></svg>
+                        <span>Caricamento modelli...</span>
+                    </div>
+                    <div class="model-grid" id="model-grid"></div>
+                    <div class="no-models-warning" id="no-models-warning" style="display:none;">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                        <span>Nessuna chiave API configurata. Modifica il file <strong>.env</strong> per aggiungere le tue chiavi API.</span>
+                    </div>
+                </div>
+
+                <!-- Analyze & Estimate Button -->
+                <button class="translate-btn analyze-btn" id="analyze-btn" disabled>
+                    <span class="translate-btn-content" id="analyze-btn-content">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+                        <span>ANALIZZA E STIMA COSTO</span>
+                    </span>
+                    <span class="translate-btn-spinner" id="analyze-btn-spinner">
+                        <svg class="spinner-svg" width="22" height="22" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none" stroke-dasharray="31.4 31.4" stroke-linecap="round"/></svg>
+                        <span>Analisi in corso...</span>
+                    </span>
+                </button>
+
+            </div>
+        </div>
+
+        <!-- Cost Estimation Panel -->
+        <div class="cost-panel" id="cost-panel">
+            <div class="cost-panel-header">
+                <div class="cost-panel-title">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                    Stima dei costi
+                </div>
+            </div>
+
+            <div class="cost-grid">
+                <div class="cost-stat-card">
+                    <div class="cost-stat-label">Caratteri</div>
+                    <div class="cost-stat-value" id="cost-chars">-</div>
+                </div>
+                <div class="cost-stat-card">
+                    <div class="cost-stat-label">Parole</div>
+                    <div class="cost-stat-value" id="cost-words">-</div>
+                </div>
+                <div class="cost-stat-card">
+                    <div class="cost-stat-label" id="cost-pages-label">Pagine</div>
+                    <div class="cost-stat-value" id="cost-pages">-</div>
+                </div>
+                <div class="cost-stat-card">
+                    <div class="cost-stat-label">Token stimati (input)</div>
+                    <div class="cost-stat-value" id="cost-input-tokens">-</div>
+                </div>
+            </div>
+
+            <div class="cost-model-row">
+                <div class="cost-model-info">
+                    <span class="cost-model-label">Modello:</span>
+                    <span class="cost-model-name" id="cost-model-name">-</span>
+                </div>
+                <div class="cost-model-info">
+                    <span class="cost-model-label">Token output stimati:</span>
+                    <span class="cost-model-name" id="cost-output-tokens">-</span>
+                </div>
+            </div>
+
+            <div class="cost-total-card">
+                <div class="cost-total-label">Costo totale stimato</div>
+                <div class="cost-total-value" id="cost-total">$0.00</div>
+                <div class="cost-total-breakdown">
+                    <span>Input: <strong id="cost-input-usd">$0.00</strong></span>
+                    <span class="cost-sep">+</span>
+                    <span>Output: <strong id="cost-output-usd">$0.00</strong></span>
+                </div>
+            </div>
+
+            <div class="cost-actions">
+                <button class="cost-back-btn" id="cost-back-btn">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+                    Modifica impostazioni
+                </button>
+                <button class="translate-btn cost-proceed-btn" id="cost-proceed-btn">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                    <span>PROCEDI CON LA TRADUZIONE</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Progress Section -->
+        <div class="progress-card" id="progress-section">
+            <div class="progress-card-header">
+                <div class="progress-card-title">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+                    Traduzione in corso
+                </div>
+                <div class="progress-percent" id="progress-percent">0%</div>
+            </div>
+
+            <div class="progress-bar-track">
+                <div class="progress-bar-fill" id="progress-bar"></div>
+                <div class="progress-bar-glow" id="progress-bar-glow"></div>
+            </div>
+
+            <div class="progress-status" id="progress-status">Inizializzazione...</div>
+
+            <div class="log-area" id="log-area"></div>
+        </div>
+
+        <!-- Download Section -->
+        <div class="download-card" id="download-section">
+            <div class="download-celebration" id="download-celebration">
+                <div class="confetti-piece" style="--i:0"></div>
+                <div class="confetti-piece" style="--i:1"></div>
+                <div class="confetti-piece" style="--i:2"></div>
+                <div class="confetti-piece" style="--i:3"></div>
+                <div class="confetti-piece" style="--i:4"></div>
+                <div class="confetti-piece" style="--i:5"></div>
+                <div class="confetti-piece" style="--i:6"></div>
+                <div class="confetti-piece" style="--i:7"></div>
+            </div>
+            <div class="download-icon">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+            </div>
+            <h3 class="download-title">Traduzione completata!</h3>
+            <p class="download-message" id="download-message">Il tuo file e stato tradotto con successo.</p>
+            <a class="download-btn-link" id="download-btn" href="#">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                <span>Scarica File Tradotto</span>
+            </a>
+        </div>
+
+        <!-- Error Section -->
+        <div class="error-card" id="error-section">
+            <div class="error-icon">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+            </div>
+            <h3 class="error-title">Si e verificato un errore</h3>
+            <p class="error-message" id="error-message">-</p>
+            <button class="error-retry-btn" id="retry-btn">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                Riprova
+            </button>
+        </div>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <div class="footer-content">
+                <span class="footer-brand">ULTIMATE TRANSLATOR</span>
+                <span class="footer-divider"></span>
+                <span class="footer-powered">Powered by OpenAI + Anthropic</span>
+            </div>
+        </footer>
+    </div>
+
+    <script>
+    // =========================================================================
+    // INLINE SVG LOGOS
+    // =========================================================================
+    const OPENAI_LOGO_SVG = `<svg class="provider-logo" viewBox="0 0 24 24" fill="currentColor" width="20" height="20"><path d="M22.282 9.821a5.985 5.985 0 0 0-.516-4.91 6.046 6.046 0 0 0-6.51-2.9A6.065 6.065 0 0 0 4.981 4.18a5.985 5.985 0 0 0-3.998 2.9 6.046 6.046 0 0 0 .743 7.097 5.98 5.98 0 0 0 .51 4.911 6.051 6.051 0 0 0 6.515 2.9A5.985 5.985 0 0 0 13.26 24a6.056 6.056 0 0 0 5.772-4.206 5.99 5.99 0 0 0 3.997-2.9 6.056 6.056 0 0 0-.747-7.073zM13.26 22.43a4.476 4.476 0 0 1-2.876-1.04l.141-.081 4.779-2.758a.795.795 0 0 0 .392-.681v-6.737l2.02 1.168a.071.071 0 0 1 .038.052v5.583a4.504 4.504 0 0 1-4.494 4.494zM3.6 18.304a4.47 4.47 0 0 1-.535-3.014l.142.085 4.783 2.759a.771.771 0 0 0 .78 0l5.843-3.369v2.332a.08.08 0 0 1-.033.062L9.74 19.95a4.5 4.5 0 0 1-6.14-1.646zM2.34 7.896a4.485 4.485 0 0 1 2.366-1.973V11.6a.766.766 0 0 0 .388.676l5.815 3.355-2.02 1.168a.076.076 0 0 1-.071 0l-4.83-2.786A4.504 4.504 0 0 1 2.34 7.872zm16.597 3.855l-5.833-3.387L15.119 7.2a.076.076 0 0 1 .071 0l4.83 2.791a4.494 4.494 0 0 1-.676 8.105v-5.678a.79.79 0 0 0-.407-.667zm2.01-3.023l-.141-.085-4.774-2.782a.776.776 0 0 0-.785 0L9.409 9.23V6.897a.066.066 0 0 1 .028-.061l4.83-2.787a4.5 4.5 0 0 1 6.68 4.66zm-12.64 4.135l-2.02-1.164a.08.08 0 0 1-.038-.057V6.075a4.5 4.5 0 0 1 7.375-3.453l-.142.08L8.704 5.46a.795.795 0 0 0-.393.681zm1.097-2.365l2.602-1.5 2.607 1.5v2.999l-2.597 1.5-2.607-1.5z"/></svg>`;
+
+    const ANTHROPIC_LOGO_SVG = `<svg class="provider-logo" viewBox="0 0 24 24" fill="currentColor" width="20" height="20"><path d="M13.827 3.52h3.603L24 20.48h-3.603l-6.57-16.96zm-7.258 0h3.767L16.906 20.48h-3.674l-1.343-3.461H5.017l-1.344 3.46H.001l6.568-16.96zm2.327 5.14L6.769 14.26h4.254l-2.127-5.6z"/></svg>`;
+
+    // =========================================================================
+    // PARTICLE BACKGROUND
+    // =========================================================================
+    (function() {
+        const canvas = document.getElementById('particle-canvas');
+        const ctx = canvas.getContext('2d');
+        let particles = [];
+        let animId;
+        let w, h;
+
+        function resize() {
+            w = canvas.width = window.innerWidth;
+            h = canvas.height = window.innerHeight;
+        }
+        resize();
+        window.addEventListener('resize', resize);
+
+        function createParticle() {
+            return {
+                x: Math.random() * w,
+                y: Math.random() * h,
+                vx: (Math.random() - 0.5) * 0.3,
+                vy: (Math.random() - 0.5) * 0.3,
+                r: Math.random() * 2 + 0.5,
+                alpha: Math.random() * 0.5 + 0.1,
+                color: Math.random() > 0.5 ? '124, 58, 237' : '6, 182, 212',
+            };
+        }
+
+        const count = Math.min(80, Math.floor(w * h / 15000));
+        for (let i = 0; i < count; i++) {
+            particles.push(createParticle());
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, w, h);
+            for (const p of particles) {
+                p.x += p.vx;
+                p.y += p.vy;
+                if (p.x < 0) p.x = w;
+                if (p.x > w) p.x = 0;
+                if (p.y < 0) p.y = h;
+                if (p.y > h) p.y = 0;
+
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(${p.color}, ${p.alpha})`;
+                ctx.fill();
+            }
+
+            for (let i = 0; i < particles.length; i++) {
+                for (let j = i + 1; j < particles.length; j++) {
+                    const dx = particles[i].x - particles[j].x;
+                    const dy = particles[i].y - particles[j].y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    if (dist < 150) {
+                        ctx.beginPath();
+                        ctx.moveTo(particles[i].x, particles[i].y);
+                        ctx.lineTo(particles[j].x, particles[j].y);
+                        ctx.strokeStyle = `rgba(124, 58, 237, ${0.06 * (1 - dist / 150)})`;
+                        ctx.lineWidth = 0.5;
+                        ctx.stroke();
+                    }
+                }
+            }
+
+            animId = requestAnimationFrame(draw);
+        }
+        draw();
+    })();
+
+    // =========================================================================
+    // APP STATE & DOM
+    // =========================================================================
+    let selectedFile = null;
+    let selectedModel = null;
+    let selectedProvider = null;
+    let availableModels = [];
+    let fileAnalysis = null;
+    let pollInterval = null;
+
+    const uploadZone = document.getElementById('upload-zone');
+    const fileInput = document.getElementById('file-input');
+    const fileCard = document.getElementById('file-card');
+    const fileCardName = document.getElementById('file-card-name');
+    const fileCardSize = document.getElementById('file-card-size');
+    const fileCardType = document.getElementById('file-card-type');
+    const fileCardIcon = document.getElementById('file-card-icon');
+    const fileCardRemove = document.getElementById('file-card-remove');
+    const detectBadge = document.getElementById('detect-badge');
+    const detectBadgeText = document.getElementById('detect-badge-text');
+    const analyzeBtn = document.getElementById('analyze-btn');
+    const analyzeBtnContent = document.getElementById('analyze-btn-content');
+    const analyzeBtnSpinner = document.getElementById('analyze-btn-spinner');
+    const costPanel = document.getElementById('cost-panel');
+    const costBackBtn = document.getElementById('cost-back-btn');
+    const costProceedBtn = document.getElementById('cost-proceed-btn');
+    const progressSection = document.getElementById('progress-section');
+    const progressBar = document.getElementById('progress-bar');
+    const progressBarGlow = document.getElementById('progress-bar-glow');
+    const progressStatus = document.getElementById('progress-status');
+    const progressPercent = document.getElementById('progress-percent');
+    const logArea = document.getElementById('log-area');
+    const downloadSection = document.getElementById('download-section');
+    const downloadBtn = document.getElementById('download-btn');
+    const downloadMessage = document.getElementById('download-message');
+    const errorSection = document.getElementById('error-section');
+    const errorMessage = document.getElementById('error-message');
+    const retryBtn = document.getElementById('retry-btn');
+    const swapBtn = document.getElementById('swap-btn');
+    const sourceLang = document.getElementById('source-lang');
+    const targetLang = document.getElementById('target-lang');
+    const modelGrid = document.getElementById('model-grid');
+    const modelLoading = document.getElementById('model-loading');
+    const noModelsWarning = document.getElementById('no-models-warning');
+
+    // =========================================================================
+    // LOAD MODELS ON STARTUP
+    // =========================================================================
+    async function loadModels() {
+        try {
+            const res = await fetch('/api/models');
+            const data = await res.json();
+
+            availableModels = data.models || [];
+            const defaultModel = data.default_model;
+            const apiStatus = data.api_status || {};
+
+            // Update API status bar
+            updateApiStatusBar(apiStatus);
+
+            // Build model cards
+            modelGrid.innerHTML = '';
+            modelLoading.style.display = 'none';
+
+            if (availableModels.length === 0) {
+                noModelsWarning.style.display = 'flex';
+                return;
+            }
+
+            // Group by provider
+            const grouped = {};
+            for (const m of availableModels) {
+                if (!grouped[m.provider]) grouped[m.provider] = [];
+                grouped[m.provider].push(m);
+            }
+
+            // Render Anthropic first, then OpenAI
+            const providerOrder = ['anthropic', 'openai'];
+            const providerNames = { anthropic: 'Anthropic (Claude)', openai: 'OpenAI' };
+
+            for (const prov of providerOrder) {
+                if (!grouped[prov]) continue;
+
+                const header = document.createElement('div');
+                header.className = 'model-provider-header';
+                header.innerHTML = `
+                    <div class="provider-logo-wrapper ${prov}">
+                        ${prov === 'openai' ? OPENAI_LOGO_SVG : ANTHROPIC_LOGO_SVG}
+                    </div>
+                    <span>${providerNames[prov]}</span>
+                    <span class="provider-count">${grouped[prov].length} modelli</span>
+                `;
+                modelGrid.appendChild(header);
+
+                for (const m of grouped[prov]) {
+                    const card = document.createElement('div');
+                    card.className = 'model-card';
+                    card.dataset.modelId = m.id;
+                    card.dataset.provider = m.provider;
+
+                    if (m.id === defaultModel) {
+                        card.classList.add('selected');
+                        selectedModel = m.id;
+                        selectedProvider = m.provider;
+                    }
+
+                    // Speed indicator
+                    let speedDots = 2;
+                    if (m.speed === 'very_fast') { speedDots = 3; }
+                    else if (m.speed === 'fast') { speedDots = 3; }
+                    else if (m.speed === 'slow') { speedDots = 1; }
+
+                    const speedDotsHtml = Array.from({length: 3}, (_, i) =>
+                        `<span class="speed-dot ${i < speedDots ? 'active' : ''}"></span>`
+                    ).join('');
+
+                    // Quality stars
+                    let qualityStars = 3;
+                    if (m.quality === 'very_high') qualityStars = 5;
+                    else if (m.quality === 'high') qualityStars = 4;
+                    else if (m.quality === 'good') qualityStars = 3;
+                    else if (m.quality === 'basic') qualityStars = 2;
+
+                    const starsHtml = Array.from({length: 5}, (_, i) =>
+                        `<span class="quality-star ${i < qualityStars ? 'active' : ''}">&#9733;</span>`
+                    ).join('');
+
+                    // Cost per dollar signs
+                    const costLen = m.cost_indicator.length;
+                    const dollarsHtml = Array.from({length: 4}, (_, i) =>
+                        `<span class="dollar-sign ${i < costLen ? 'active' : ''}">$</span>`
+                    ).join('');
+
+                    card.innerHTML = `
+                        <div class="model-card-top">
+                            <div class="model-card-logo ${m.provider}">
+                                ${m.provider === 'openai' ? OPENAI_LOGO_SVG : ANTHROPIC_LOGO_SVG}
+                            </div>
+                            <div class="model-card-badge quality-${m.quality}">${m.quality_badge}</div>
+                        </div>
+                        <div class="model-card-name">${m.display_name}</div>
+                        <div class="model-card-desc">${m.description || ''}</div>
+                        <div class="model-card-meta">
+                            <div class="model-meta-item">
+                                <span class="model-meta-label">Qualita</span>
+                                <div class="quality-stars">${starsHtml}</div>
+                            </div>
+                            <div class="model-meta-item">
+                                <span class="model-meta-label">Velocita</span>
+                                <div class="speed-dots">${speedDotsHtml}</div>
+                            </div>
+                            <div class="model-meta-item">
+                                <span class="model-meta-label">Costo</span>
+                                <div class="dollar-signs">${dollarsHtml}</div>
+                            </div>
+                        </div>
+                        <div class="model-card-pricing">
+                            <span>$${m.input_cost.toFixed(2)} / $${m.output_cost.toFixed(2)} per 1M tok</span>
+                        </div>
+                        <div class="model-card-check">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+                        </div>
+                    `;
+
+                    card.addEventListener('click', () => selectModel(m.id, m.provider));
+                    modelGrid.appendChild(card);
+                }
+            }
+
+            updateAnalyzeButton();
+
+        } catch (err) {
+            console.error('Failed to load models:', err);
+            modelLoading.innerHTML = '<span style="color: var(--error-light);">Errore nel caricamento dei modelli. Assicurati che il server sia avviato.</span>';
+        }
+    }
+
+    function selectModel(modelId, provider) {
+        selectedModel = modelId;
+        selectedProvider = provider;
+
+        // Update selected state
+        document.querySelectorAll('.model-card').forEach(c => c.classList.remove('selected'));
+        const card = document.querySelector(`.model-card[data-model-id="${modelId}"]`);
+        if (card) card.classList.add('selected');
+
+        updateAnalyzeButton();
+
+        // If cost panel is visible, recalculate
+        if (costPanel.classList.contains('visible') && fileAnalysis) {
+            recalculateCost();
+        }
+    }
+
+    function updateApiStatusBar(status) {
+        const openaiEl = document.getElementById('api-status-openai');
+        const anthropicEl = document.getElementById('api-status-anthropic');
+
+        if (status.openai) {
+            openaiEl.querySelector('.api-dot').className = 'api-dot api-dot-connected';
+            openaiEl.querySelector('.api-status-label').textContent = 'Connesso';
+        }
+        if (status.anthropic) {
+            anthropicEl.querySelector('.api-dot').className = 'api-dot api-dot-connected';
+            anthropicEl.querySelector('.api-status-label').textContent = 'Connesso';
+        }
+    }
+
+    function updateAnalyzeButton() {
+        analyzeBtn.disabled = !(selectedFile && selectedModel);
+    }
+
+    // Load models when page opens
+    loadModels();
+
+    // =========================================================================
+    // FILE UPLOAD
+    // =========================================================================
+    uploadZone.addEventListener('click', () => fileInput.click());
+
+    uploadZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        uploadZone.classList.add('dragover');
+    });
+
+    uploadZone.addEventListener('dragleave', (e) => {
+        e.preventDefault();
+        uploadZone.classList.remove('dragover');
+    });
+
+    uploadZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        uploadZone.classList.remove('dragover');
+        if (e.dataTransfer.files.length > 0) handleFile(e.dataTransfer.files[0]);
+    });
+
+    fileInput.addEventListener('change', () => {
+        if (fileInput.files.length > 0) handleFile(fileInput.files[0]);
+    });
+
+    fileCardRemove.addEventListener('click', (e) => {
+        e.stopPropagation();
+        clearFile();
+    });
+
+    function handleFile(file) {
+        const ext = file.name.split('.').pop().toLowerCase();
+        if (!['epub', 'pdf'].includes(ext)) {
+            showNotification('Formato non supportato. Usa file EPUB o PDF.', 'error');
+            return;
+        }
+        if (file.size > 100 * 1024 * 1024) {
+            showNotification('File troppo grande. Massimo 100MB.', 'error');
+            return;
+        }
+
+        selectedFile = file;
+        fileAnalysis = null;
+
+        fileCardName.textContent = file.name;
+        fileCardSize.textContent = formatSize(file.size);
+        fileCardType.textContent = ext.toUpperCase();
+        fileCardType.className = 'file-card-type badge-' + ext;
+        fileCard.classList.add('visible');
+        uploadZone.classList.add('has-file');
+
+        // Hide previous results
+        downloadSection.classList.remove('visible');
+        errorSection.classList.remove('visible');
+        progressSection.classList.remove('visible');
+        costPanel.classList.remove('visible');
+
+        updateAnalyzeButton();
+        detectLanguage(file);
+    }
+
+    function clearFile() {
+        selectedFile = null;
+        fileAnalysis = null;
+        fileInput.value = '';
+        fileCard.classList.remove('visible');
+        uploadZone.classList.remove('has-file');
+        analyzeBtn.disabled = true;
+        detectBadge.classList.remove('visible', 'detected', 'detecting');
+        costPanel.classList.remove('visible');
+    }
+
+    function formatSize(bytes) {
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+        return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    }
+
+    function formatNumber(n) {
+        return n.toLocaleString('it-IT');
+    }
+
+    // =========================================================================
+    // LANGUAGE DETECTION
+    // =========================================================================
+    async function detectLanguage(file) {
+        detectBadge.classList.add('visible', 'detecting');
+        detectBadge.classList.remove('detected');
+        detectBadgeText.textContent = 'Rilevamento lingua...';
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        try {
+            const res = await fetch('/api/detect-language', { method: 'POST', body: formData });
+            const data = await res.json();
+
+            if (data.language) {
+                detectBadge.classList.remove('detecting');
+                detectBadge.classList.add('detected');
+                detectBadgeText.textContent = 'Rilevato: ' + data.language;
+
+                const options = sourceLang.options;
+                for (let i = 0; i < options.length; i++) {
+                    if (options[i].value.toLowerCase() === data.language.toLowerCase()) {
+                        sourceLang.value = options[i].value;
+                        break;
+                    }
+                }
+            } else {
+                detectBadge.classList.remove('detecting', 'detected');
+                detectBadge.classList.remove('visible');
+            }
+        } catch (err) {
+            console.error('Language detection failed:', err);
+            detectBadge.classList.remove('visible', 'detecting');
+        }
+    }
+
+    // =========================================================================
+    // SWAP LANGUAGES
+    // =========================================================================
+    swapBtn.addEventListener('click', () => {
+        const temp = sourceLang.value;
+        sourceLang.value = targetLang.value;
+        targetLang.value = temp;
+        swapBtn.classList.add('swapping');
+        setTimeout(() => swapBtn.classList.remove('swapping'), 400);
+    });
+
+    // =========================================================================
+    // ANALYZE & COST ESTIMATION
+    // =========================================================================
+    analyzeBtn.addEventListener('click', analyzeFile);
+
+    async function analyzeFile() {
+        if (!selectedFile || !selectedModel) return;
+
+        if (sourceLang.value === targetLang.value) {
+            showNotification('Seleziona lingue diverse per la traduzione.', 'error');
+            return;
+        }
+
+        // UI: loading
+        analyzeBtn.disabled = true;
+        analyzeBtn.classList.add('loading');
+
+        const formData = new FormData();
+        formData.append('file', selectedFile);
+        formData.append('model', selectedModel);
+
+        try {
+            const res = await fetch('/api/analyze', { method: 'POST', body: formData });
+            const data = await res.json();
+
+            if (!res.ok) throw new Error(data.error || 'Errore del server');
+
+            fileAnalysis = data;
+            showCostPanel(data);
+
+        } catch (err) {
+            showNotification(err.message, 'error');
+        } finally {
+            analyzeBtn.disabled = false;
+            analyzeBtn.classList.remove('loading');
+        }
+    }
+
+    function showCostPanel(data) {
+        document.getElementById('cost-chars').textContent = formatNumber(data.total_chars);
+        document.getElementById('cost-words').textContent = formatNumber(data.total_words);
+
+        if (data.file_type === 'epub') {
+            document.getElementById('cost-pages-label').textContent = 'Capitoli';
+            document.getElementById('cost-pages').textContent = formatNumber(data.num_chapters || 0);
+        } else {
+            document.getElementById('cost-pages-label').textContent = 'Pagine';
+            document.getElementById('cost-pages').textContent = formatNumber(data.num_pages || 0);
+        }
+
+        document.getElementById('cost-input-tokens').textContent = formatNumber(data.input_tokens);
+        document.getElementById('cost-output-tokens').textContent = formatNumber(data.output_tokens);
+        document.getElementById('cost-model-name').textContent = data.model_display_name;
+        document.getElementById('cost-total').textContent = '$' + data.total_cost.toFixed(4);
+        document.getElementById('cost-input-usd').textContent = '$' + data.input_cost.toFixed(4);
+        document.getElementById('cost-output-usd').textContent = '$' + data.output_cost.toFixed(4);
+
+        costPanel.classList.add('visible');
+
+        // Scroll to cost panel
+        costPanel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    async function recalculateCost() {
+        if (!selectedFile || !selectedModel) return;
+
+        // Re-analyze with new model
+        const formData = new FormData();
+        formData.append('file', selectedFile);
+        formData.append('model', selectedModel);
+
+        try {
+            const res = await fetch('/api/analyze', { method: 'POST', body: formData });
+            const data = await res.json();
+            if (res.ok) {
+                fileAnalysis = data;
+                showCostPanel(data);
+            }
+        } catch (err) {
+            console.error('Recalculate failed:', err);
+        }
+    }
+
+    // Cost panel navigation
+    costBackBtn.addEventListener('click', () => {
+        costPanel.classList.remove('visible');
+    });
+
+    costProceedBtn.addEventListener('click', startTranslation);
+    retryBtn.addEventListener('click', () => {
+        costPanel.classList.remove('visible');
+        errorSection.classList.remove('visible');
+    });
+
+    // =========================================================================
+    // TRANSLATION
+    // =========================================================================
+    async function startTranslation() {
+        if (!selectedFile || !selectedModel) return;
+
+        if (sourceLang.value === targetLang.value) {
+            showNotification('Seleziona lingue diverse per la traduzione.', 'error');
+            return;
+        }
+
+        // UI: loading state
+        costPanel.classList.remove('visible');
+        progressSection.classList.add('visible');
+        downloadSection.classList.remove('visible');
+        errorSection.classList.remove('visible');
+        progressBar.style.width = '0%';
+        progressBarGlow.style.width = '0%';
+        progressPercent.textContent = '0%';
+        progressStatus.textContent = 'Caricamento file...';
+        logArea.innerHTML = '';
+
+        addLog('Caricamento file: ' + selectedFile.name, 'info');
+        addLog('Modello: ' + selectedModel + ' (' + selectedProvider + ')', 'info');
+
+        const formData = new FormData();
+        formData.append('file', selectedFile);
+        formData.append('source_lang', sourceLang.value);
+        formData.append('target_lang', targetLang.value);
+        formData.append('provider', selectedProvider);
+        formData.append('model', selectedModel);
+
+        try {
+            const response = await fetch('/api/translate', { method: 'POST', body: formData });
+            const data = await response.json();
+
+            if (!response.ok) throw new Error(data.error || 'Errore del server');
+
+            addLog('File caricato. Inizio traduzione...', 'info');
+            pollProgress(data.task_id);
+        } catch (err) {
+            showError(err.message);
+        }
+    }
+
+    function pollProgress(taskId) {
+        if (pollInterval) clearInterval(pollInterval);
+
+        pollInterval = setInterval(async () => {
+            try {
+                const res = await fetch('/api/status/' + taskId);
+                const data = await res.json();
+
+                if (data.progress !== undefined) {
+                    const pct = Math.round(data.progress * 100);
+                    progressBar.style.width = pct + '%';
+                    progressBarGlow.style.width = pct + '%';
+                    progressPercent.textContent = pct + '%';
+                }
+
+                if (data.status_text) {
+                    progressStatus.textContent = data.status_text;
+                }
+
+                if (data.logs) {
+                    const current = logArea.children.length;
+                    for (let i = current; i < data.logs.length; i++) {
+                        addLog(data.logs[i].message, data.logs[i].level);
+                    }
+                }
+
+                if (data.status === 'completed') {
+                    clearInterval(pollInterval);
+                    pollInterval = null;
+                    progressBar.style.width = '100%';
+                    progressBarGlow.style.width = '100%';
+                    progressPercent.textContent = '100%';
+                    progressStatus.textContent = 'Completato!';
+                    addLog('Traduzione completata con successo!', 'success');
+
+                    downloadBtn.href = '/api/download/' + taskId;
+                    downloadBtn.download = data.output_filename || 'tradotto';
+                    downloadMessage.textContent = 'File: ' + (data.output_filename || 'tradotto');
+                    downloadSection.classList.add('visible');
+                }
+
+                if (data.status === 'error') {
+                    clearInterval(pollInterval);
+                    pollInterval = null;
+                    showError(data.error || 'Errore durante la traduzione');
+                }
+            } catch (err) {
+                console.error('Poll error:', err);
+            }
+        }, 2000);
+    }
+
+    function addLog(message, level) {
+        const entry = document.createElement('div');
+        entry.className = 'log-entry log-' + (level || 'info');
+        const time = new Date().toLocaleTimeString('it-IT');
+        entry.textContent = '[' + time + '] ' + message;
+        logArea.appendChild(entry);
+        logArea.scrollTop = logArea.scrollHeight;
+    }
+
+    function showError(message) {
+        errorMessage.textContent = message;
+        errorSection.classList.add('visible');
+        progressSection.classList.remove('visible');
+    }
+
+    // Simple notification
+    function showNotification(msg, type) {
+        const n = document.createElement('div');
+        n.className = 'notification notification-' + type;
+        n.textContent = msg;
+        document.body.appendChild(n);
+        requestAnimationFrame(() => n.classList.add('visible'));
+        setTimeout(() => {
+            n.classList.remove('visible');
+            setTimeout(() => n.remove(), 300);
+        }, 3000);
+    }
+    </script>
+</body>
+</html>
