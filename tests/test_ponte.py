@@ -199,3 +199,26 @@ def test_il_codice_si_cambia_solo_dopo_il_login(app, client):
     assert nuovo != vecchio
     assert _script(app, vecchio).post('/api/library/key', json={'code': vecchio}).status_code == 404
     assert _script(app, nuovo).post('/api/library/key', json={'code': nuovo}).status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Titoli: quelli lasciati da scanner ed editor non valgono il nome del file
+# ---------------------------------------------------------------------------
+
+def test_i_titoli_spazzatura_lasciano_il_posto_al_nome_del_file():
+    casi = {
+        ('CamScanner 07-02-2020 18.02.04', 'Copywriting Secrets & Tactics.pdf'): 'Copywriting Secrets & Tactics',
+        ('Preview of “WIZARD of ads cropped.pdf”', 'The Wizard of Ads.pdf'): 'The Wizard of Ads',
+        ('How to write Letters_234x156.pdf, page 1-320', 'How to Write Sales Letters That Sell.pdf'):
+            'How to Write Sales Letters That Sell',
+        ('高績效心智', 'How to Do Better Creative Work.epub'): 'How to Do Better Creative Work',
+        ('Microsoft Word - bozza3.docx', 'Il mio libro.pdf'): 'Il mio libro',
+        ('', 'Senza titolo.epub'): 'Senza titolo',
+    }
+    for (titolo, nome), atteso in casi.items():
+        assert library.clean_title(titolo, nome) == atteso, (titolo, nome)
+    # i titoli veri restano, anche in altri alfabeti se il file non e' in latino
+    assert library.clean_title('Influence: The Psychology of Persuasion', 'influence.epub') == \
+        'Influence: The Psychology of Persuasion'
+    assert library.clean_title('Documenting Software Architectures', 'dsa.pdf') == 'Documenting Software Architectures'
+    assert library.clean_title('高績效心智', '高績效心智.epub') == '高績效心智'

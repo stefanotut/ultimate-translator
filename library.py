@@ -231,6 +231,31 @@ def _free_pdf_cache():
         pass
 
 
+_JUNK_TITLE = re.compile(
+    r'camscanner|microsoft word|untitled|preview of|\.(pdf|docx?|epub|indd|qxd)\b'
+    r'|page \d+\s*-\s*\d+|^\s*document\s*\d*\s*$',
+    re.IGNORECASE,
+)
+
+
+def clean_title(meta_title, filename):
+    """
+    The title stored in the file, unless it is junk left by a scanner or an
+    editor ("CamScanner 07-02-2020", "Preview of “x.pdf”", "Letters_234x156.pdf,
+    page 1-320") or another book's title in another alphabet: then the file
+    name, which the user chose, is the better title.
+    """
+    fallback = title_from_filename(filename)
+    title = (meta_title or '').strip()
+    if not title or _JUNK_TITLE.search(title):
+        return fallback
+    latin_in_name = sum(c.isascii() and c.isalpha() for c in fallback)
+    foreign_in_title = sum(ord(c) > 0x2FF for c in title)
+    if latin_in_name >= 3 and foreign_in_title > len(title) * 0.3:
+        return fallback
+    return title
+
+
 def _tagging_context(info):
     return {
         'description': info.get('description'),
@@ -303,7 +328,7 @@ def import_book(library_id, file_storage, folder_id=None, allow_duplicate=False,
         try:
             book = library_db.create_book(
                 library_id, book_id, folder_id, unique=not allow_duplicate,
-                title=(info.get('title') or title_from_filename(filename))[:library_db.MAX_TITLE],
+                title=clean_title(info.get('title'), filename)[:library_db.MAX_TITLE],
                 author=info.get('author'),
                 original_filename=filename[:255],
                 file_type=ext,
@@ -375,7 +400,7 @@ def adopt_existing_file(library_id, path, filename, ext, job_id, folder_id=None)
     try:
         book = library_db.create_book(
             library_id, book_id, folder_id, unique=False,
-            title=(info.get('title') or title_from_filename(filename))[:library_db.MAX_TITLE],
+            title=clean_title(info.get('title'), filename)[:library_db.MAX_TITLE],
             author=info.get('author'),
             original_filename=filename[:255],
             file_type=ext,
