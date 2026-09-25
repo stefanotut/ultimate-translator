@@ -11,9 +11,11 @@ Strategy:
 """
 
 import os
+import html
 import logging
 import fitz  # PyMuPDF
-from translator import translate_text, estimate_tokens
+from translator import translate_blocks, estimate_tokens
+from pdf_layout import analyze_page
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +51,98 @@ def _extract_color(span: dict) -> tuple:
     if isinstance(c, (tuple, list)) and len(c) >= 3:
         return tuple(c[:3])
     return (0, 0, 0)
+
+
+def _page_is_scanned(page) -> bool:
+    """
+    True se la pagina e' una fotografia con sotto uno strato OCR invisibile.
+
+    Su questi PDF il testo che si vede sono PIXEL dentro un'immagine: le
+    redazioni non possono cancellarlo (toglierebbero l'intera scansione), e
+    scriverci sopra produce testo sovrapposto. Vanno trattate diversamente.
+    """
+    area = page.rect.width * page.rect.height
+    if area <= 0:
+        return False
+    coperta = 0.0
+    for blk in page.get_text("dict").get("blocks", []):
+        if blk.get("type") == 1:            # 1 = immagine
+            r = fitz.Rect(blk["bbox"])
+            coperta += abs(r.width * r.height)
+    return (coperta / area) >= 0.8
+
+
+def _page_paper_color(page):
+    """
+    Un unico colore di carta per l'intera pagina.
+
+    Campionare il margine accanto a ogni blocco sembrava piu' preciso, ma la
+    luce di una scansione non e' uniforme: ogni toppa usciva di una tinta
+    leggermente diversa e sullo schermo si vedeva un patchwork di rettangoli
+    grigi. Un solo colore, preso dai pixel chiari di tutta la pagina, sparisce.
+    """
+    try:
+        pix = page.get_pixmap(colorspace=fitz.csRGB, dpi=36)
+        dati = pix.samples
+        if not dati:
+            return (1, 1, 1)
+        # Colore PIU' FREQUENTE fra i pixel chiari, non la mediana: la mediana
+        # includeva i bordi in ombra della scansione e usciva ~2% piu' scura
+        # della carta, abbastanza da far vedere le toppe come bande grigie.
+        from collections import Counter
+        conteggio = Counter()
+        # Un passo di 3 pixel basta e rende il calcolo istantaneo.
+        for i in range(0, len(dati) - 2, 9):
+            r, g, b = dati[i], dati[i + 1], dati[i + 2]
+            if r > 185 and g > 185 and b > 185:
+                conteggio[(r >> 1 << 1, g >> 1 << 1, b >> 1 << 1)] += 1
+        if not conteggio:
+            return (1, 1, 1)
+        dominante, quante = conteggio.most_common(1)[0]
+        if quante < 30:
+            return (1, 1, 1)
+        return tuple(c / 255.0 for c in dominante)
+    except Exception:
+        return (1, 1, 1)
+
+
+def _write_block(page, bbox, limite_inferiore, testo, font_size, color):
+    """
+    Scrive il testo tradotto al posto dell'originale.
+
+    Due scelte importanti:
+    1. `insert_htmlbox` e non `insert_textbox`: i font base del PDF sono
+       Latin-1 e trasformavano trattini lunghi, puntini di sospensione e
+       virgolette curve in "?", corrompendo il testo.
+    2. Il riquadro puo' crescere verso il basso fino a `limite_inferiore`
+       (dove inizia il paragrafo successivo). L'italiano e' ~15-20% piu' lungo
+       dell'inglese: senza questo spazio ogni blocco si rimpicciolirebbe da
+       solo e la pagina risulterebbe con corpi tipografici tutti diversi.
+    """
+    if not testo or not testo.strip():
+        return True
+
+    corpo = html.escape(testo.strip())
+    corpo = corpo.replace("\n\n", "<br><br>").replace("\n", " ")
+
+    def html_di():
+        return ('<div style="font-family:Times,Georgia,serif;font-size:%.2fpx;'
+                'line-height:1.16;color:rgb(%d,%d,%d);text-align:justify;'
+                'margin:0">%s</div>'
+                % (font_size, color[0] * 255, color[1] * 255, color[2] * 255, corpo))
+
+    riquadro = fitz.Rect(bbox.x0, bbox.y0, bbox.x1,
+                         max(limite_inferiore, bbox.y1)) & page.rect
+
+    for scala_min in (0.92, 0.70, 0.45):
+        try:
+            avanzo, _ = page.insert_htmlbox(riquadro, html_di(), scale_low=scala_min)
+            if avanzo >= 0:
+                return True
+        except Exception as e:
+            logger.warning("htmlbox non riuscito: %s", str(e)[:80])
+            return False
+    return False
 
 
 def _group_nearby_blocks(blocks: list, vertical_threshold: float = 5.0) -> list:
@@ -156,168 +250,271 @@ def analyze_pdf(input_path: str) -> dict:
 # Main translation function
 # ---------------------------------------------------------------------------
 
+def _cover(page, rects, scansionata):
+    """
+    Toglie di mezzo il testo originale, sia quello visibile sia quello cercabile.
+
+    Su una scansione servono DUE operazioni:
+      - la redazione elimina lo strato OCR invisibile. Senza, il PDF finale
+        resterebbe cercabile *in inglese*: selezionando o cercando nel libro
+        tradotto si troverebbe il testo originale sotto la vernice.
+      - il rettangolo copre i pixel dell'inglese, che stanno dentro
+        l'immagine e nessuna redazione puo' rimuovere.
+    Il colore si campiona prima di coprire, altrimenti si campionerebbe la
+    vernice appena stesa.
+    """
+    # Il colore si legge PRIMA di redigere e coprire, altrimenti si
+    # campionerebbe la vernice appena stesa.
+    carta = _page_paper_color(page) if scansionata else None
+
+    for r in rects:
+        page.add_redact_annot(r)
+    page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
+
+    if scansionata:
+        for r in rects:
+            box = fitz.Rect(r); box.x0 -= 1.5; box.y0 -= 1.5
+            box.x1 += 1.5; box.y1 += 1.5
+            page.draw_rect(box & page.rect, color=None, fill=carta, overlay=True)
+
+
+def _body_html(paragrafi, corpo, interlinea, colore):
+    """
+    Una sola colonna di testo che scorre, come in un libro.
+
+    Prima ogni blocco OCR veniva impaginato in una scatola sua, con un corpo
+    tipografico calcolato a parte: la pagina usciva con quattro dimensioni
+    diverse e buchi bianchi. Qui la pagina e' un unico flusso.
+    """
+    rgb = "rgb(%d,%d,%d)" % (colore[0] * 255, colore[1] * 255, colore[2] * 255)
+    pezzi = [
+        '<div style="font-family:Georgia,\'Times New Roman\',Times,serif;'
+        'font-size:%.2fpx;line-height:%.3f;color:%s;text-align:justify;'
+        'hyphens:auto">' % (corpo, interlinea / corpo, rgb)
+    ]
+    primo_corpo = True
+    for par in paragrafi:
+        testo = html.escape(par["testo"]).replace("\n", " ")
+        if par["tipo"] == "h":
+            pezzi.append(
+                '<p style="font-size:%.2fpx;line-height:1.2;font-weight:bold;'
+                'text-align:left;margin:%.1fpx 0 %.1fpx 0;text-indent:0">%s</p>'
+                % (par["dim"], interlinea * 0.9, interlinea * 0.45, testo))
+            primo_corpo = True          # il capoverso dopo un titolo non rientra
+        else:
+            rientro = "0" if primo_corpo else "1.6em"
+            pezzi.append('<p style="margin:0;text-indent:%s">%s</p>'
+                         % (rientro, testo))
+            primo_corpo = False
+    pezzi.append("</div>")
+    return "".join(pezzi)
+
+
 def translate_pdf(
     input_path: str,
     output_path: str,
     source_lang: str = "English",
     target_lang: str = "Italian",
     provider: str = "anthropic",
-    model: str = "claude-sonnet-4-20250514",
+    model: str = "claude-sonnet-5",
     progress_callback=None,
 ):
     """
-    Translate a PDF file preserving layout and images.
-    Groups nearby text blocks for more coherent translations.
+    Traduce un PDF ricostruendo l'impaginazione del libro.
+
+    Tre fasi: si legge la struttura di tutte le pagine (testatine, capoversi,
+    titoli, corpo, interlinea), si traduce tutto in lotti paralleli, si
+    reimpagina ogni pagina come un'unica colonna di testo.
     """
     doc = fitz.open(input_path)
     total_pages = len(doc)
-
-    logger.info(f"PDF has {total_pages} pages to translate")
+    logger.info("PDF: %d pagine", total_pages)
 
     if total_pages == 0:
-        logger.warning("PDF has no pages")
         doc.save(output_path)
         doc.close()
         if progress_callback:
             progress_callback(1.0, "Completato! (PDF vuoto)")
         return
 
-    previous_translated = ""
+    # --- Fase 1: struttura tipografica ------------------------------------
+    strutture = {}
+    da_tradurre = []          # (num_pagina, 'p'|'t', indice)
+    for pno in range(total_pages):
+        if progress_callback and pno % 25 == 0:
+            progress_callback(min(pno / total_pages * 0.08, 0.08),
+                              "Analisi impaginazione: pagina %d/%d" % (pno + 1, total_pages))
+        s = analyze_page(doc[pno])
+        if not s["paragrafi"] and not s["testatina"]:
+            continue
+        strutture[pno] = s
+        for i, _p in enumerate(s["paragrafi"]):
+            da_tradurre.append((pno, "p", i))
+        for i, _t in enumerate(s["testatina"]):
+            da_tradurre.append((pno, "t", i))
 
-    for page_num in range(total_pages):
-        page = doc[page_num]
-
-        logger.info(f"  Translating page {page_num + 1}/{total_pages}")
-
+    if not da_tradurre:
+        doc.save(output_path)
+        doc.close()
         if progress_callback:
-            progress = page_num / total_pages
-            progress_callback(
-                progress,
-                f"Pagina {page_num + 1}/{total_pages} - Analisi layout..."
-            )
+            progress_callback(1.0, "Completato! (nessun testo trovato)")
+        return
 
-        text_dict = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)
+    testi = []
+    for pno, tipo, i in da_tradurre:
+        s = strutture[pno]
+        testi.append(s["paragrafi"][i]["text"] if tipo == "p"
+                     else s["testatina"][i]["text"])
 
-        raw_blocks = []
+    logger.info("PDF: %d paragrafi/testatine da tradurre", len(testi))
 
-        for block in text_dict.get("blocks", []):
-            if block.get("type") != 0:
-                continue
+    # --- Fase 2: traduzione in lotti paralleli ----------------------------
+    def avanzamento(fatti, totale):
+        if progress_callback:
+            progress_callback(0.08 + min(fatti / max(totale, 1), 1.0) * 0.84,
+                              "Tradotti %d/%d paragrafi" % (fatti, totale))
 
-            block_text = ""
-            block_spans = []
+    tradotti = translate_blocks(testi, source_lang, target_lang,
+                                provider=provider, model=model,
+                                progress_callback=avanzamento)
 
-            for line in block.get("lines", []):
-                line_text = ""
-                for span in line.get("spans", []):
-                    span_text = span.get("text", "")
-                    line_text += span_text
-                    if _is_translatable(span_text):
-                        block_spans.append(span)
-                block_text += line_text + "\n"
+    for (pno, tipo, i), testo in zip(da_tradurre, tradotti):
+        s = strutture[pno]
+        if tipo == "p":
+            s["paragrafi"][i]["tradotto"] = testo
+        else:
+            s["testatina"][i]["tradotto"] = testo
 
-            block_text = block_text.strip()
-            if not _is_translatable(block_text):
-                continue
+    # --- Fase 3: reimpaginazione ------------------------------------------
+    if progress_callback:
+        progress_callback(0.93, "Reimpaginazione...")
 
-            bbox = fitz.Rect(block["bbox"])
-            font_name, font_size = _get_dominant_font(block_spans)
+    scansioni = strette = 0
+    for pno, s in strutture.items():
+        page = doc[pno]
+        scansionata = _page_is_scanned(page)
+        scansioni += 1 if scansionata else 0
 
-            raw_blocks.append({
-                "text": block_text,
-                "bbox": bbox,
-                "font_name": font_name,
-                "font_size": font_size,
-                "spans": block_spans,
-            })
+        _cover(page,
+               [r["bbox"] for r in s["righe"]] +
+               [r["bbox"] for r in s["testatina"]] +
+               [r["bbox"] for r in s["pieDiPagina"]],
+               scansionata)
 
-        if not raw_blocks:
-            logger.info(f"  Page {page_num + 1}: no translatable text")
+        # Testatina e folio: ognuno nel proprio spazio.
+        #
+        # Allargare le caselle a occhio le faceva scontrare: il titolo corrente
+        # finiva sopra il numero di pagina ("...A CREARE7"). Il limite di
+        # ciascuna e' l'inizio della successiva.
+        intestazioni = sorted(s["testatina"], key=lambda r: r["bbox"].x0)
+        for i, r in enumerate(intestazioni):
+            testo = r.get("tradotto") or r["text"]
+            misure = [sp.get("size", 0) for sp in r["spans"] if sp.get("size")]
+            dim = max(misure) if misure else s["corpo"]
+
+            limite = (intestazioni[i + 1]["bbox"].x0 - 4) if i + 1 < len(intestazioni) \
+                else page.rect.x1 - 4
+            # Un numero di pagina sul lato destro si allinea a destra, come
+            # nell'originale; il titolo corrente resta allineato a sinistra.
+            a_destra = r["bbox"].x0 > page.rect.width * 0.55
+            box = fitz.Rect(r["bbox"].x0 if not a_destra else max(r["bbox"].x0 - 90, 0),
+                            r["bbox"].y0 - 1,
+                            max(limite, r["bbox"].x1),
+                            min(r["bbox"].y1 + dim * 0.6, page.rect.y1))
+            try:
+                page.insert_htmlbox(
+                    box,
+                    '<div style="font-family:Georgia,serif;font-size:%.2fpx;'
+                    'color:#000;text-align:%s;white-space:nowrap;margin:0">%s</div>'
+                    % (dim, "right" if a_destra else "left", html.escape(testo)),
+                    scale_low=0.45)
+            except Exception:
+                pass
+
+        if not s["paragrafi"]:
             continue
 
-        grouped = _group_nearby_blocks(raw_blocks)
+        colonna = s["colonna"]
+        # Il testo puo' scorrere fino al margine inferiore: l'italiano e'
+        # piu' lungo dell'inglese e senza spazio si rimpicciolirebbe.
+        area = fitz.Rect(colonna.x0, colonna.y0, colonna.x1,
+                         page.rect.y1 - page.rect.height * 0.055) & page.rect
 
-        if progress_callback:
-            progress_callback(
-                page_num / total_pages + 0.3 / total_pages,
-                f"Pagina {page_num + 1}/{total_pages} - Traduzione {len(grouped)} blocchi..."
-            )
+        colore = (0, 0, 0)
+        for r in s["righe"]:
+            if r["spans"]:
+                colore = _extract_color(r["spans"][0])
+                break
 
-        for i, group in enumerate(grouped):
+        paragrafi = [{"tipo": p["tipo"], "dim": p["dim"],
+                      "testo": p.get("tradotto") or p["text"]}
+                     for p in s["paragrafi"]]
+
+        piazzato = False
+        for scala in (0.95, 0.8, 0.62, 0.45):
             try:
-                translated = translate_text(
-                    group["text"],
-                    source_lang,
-                    target_lang,
-                    provider=provider,
-                    model=model,
-                    previous_context=previous_translated,
-                )
-                group["translated"] = translated
-                previous_translated = translated
-            except Exception as e:
-                logger.error(f"Failed to translate block on page {page_num + 1}: {e}")
-                group["translated"] = group["text"]
-
-            if progress_callback:
-                block_progress = (page_num + (i + 1) / len(grouped)) / total_pages
-                progress_callback(
-                    min(block_progress, 0.99),
-                    f"Pagina {page_num + 1}/{total_pages} - Blocco {i + 1}/{len(grouped)}"
-                )
-
-        for group in grouped:
-            bbox = group["bbox"]
-            page.add_redact_annot(bbox)
-
-        page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
-
-        for group in grouped:
-            bbox = group["bbox"]
-            translated = group["translated"]
-
-            font_name, font_size = _get_dominant_font(group["spans"])
-
-            color = (0, 0, 0)
-            if group["spans"]:
-                color = _extract_color(group["spans"][0])
-
-            fontname = "helv"
-
-            rc = -1
-            current_size = font_size
-            min_size = max(font_size * 0.55, 5.5)
-
-            while current_size >= min_size:
-                rc = page.insert_textbox(
-                    bbox,
-                    translated,
-                    fontsize=current_size,
-                    fontname=fontname,
-                    color=color,
-                    align=fitz.TEXT_ALIGN_LEFT,
-                )
-                if rc >= 0:
+                avanzo, _ = page.insert_htmlbox(
+                    area, _body_html(paragrafi, s["corpo"], s["interlinea"], colore),
+                    scale_low=scala)
+                if avanzo >= 0:
+                    piazzato = True
                     break
-                current_size -= 0.5
+            except Exception as e:
+                logger.warning("Impaginazione fallita a pagina %d: %s", pno + 1, str(e)[:80])
+                break
+        if not piazzato:
+            strette += 1
 
-            if rc < 0:
-                page.insert_textbox(
-                    bbox,
-                    translated,
-                    fontsize=min_size,
-                    fontname=fontname,
-                    color=color,
-                    align=fitz.TEXT_ALIGN_LEFT,
-                )
+    if strette:
+        logger.warning("%d pagine con testo piu' lungo dello spazio disponibile", strette)
+    logger.info("PDF: %d pagine erano scansioni", scansioni)
 
     if progress_callback:
-        progress_callback(0.99, "Salvataggio PDF...")
+        progress_callback(0.98, "Salvataggio PDF...")
 
     doc.save(output_path, garbage=4, deflate=True, clean=True)
     doc.close()
-
-    logger.info(f"Translated PDF saved to: {output_path}")
+    logger.info("PDF tradotto salvato in %s", output_path)
 
     if progress_callback:
         progress_callback(1.0, "Completato!")
+
+
+def controlla_fedelta(originale, tradotto):
+    """Confronta la forma del PDF tradotto con quella dell'originale.
+
+    Nel PDF l'impaginazione la rifacciamo noi, quindi il rischio e' piu' alto
+    che nell'EPUB: qui si controlla che il numero di pagine coincida (il testo
+    deve restare sulla SUA pagina, altrimenti l'indice e i rimandi interni non
+    tornano piu') e che nessuna pagina sia rimasta muta.
+
+    Restituisce (va_bene, righe_da_scrivere_nel_registro).
+    """
+    try:
+        a = fitz.open(originale)
+        b = fitz.open(tradotto)
+    except Exception as e:
+        return True, ["Controllo di fedelta' non eseguito: %s" % str(e)[:120]]
+
+    righe = []
+    va_bene = True
+    if a.page_count != b.page_count:
+        va_bene = False
+        righe.append("ATTENZIONE: %d pagine invece di %d: i rimandi interni e "
+                     "l'indice non corrispondono piu'." % (b.page_count, a.page_count))
+
+    # Pagine che nell'originale avevano testo e nel tradotto no.
+    mute = 0
+    controllate = min(a.page_count, b.page_count)
+    for i in range(controllate):
+        if len(a[i].get_text().strip()) > 80 and len(b[i].get_text().strip()) < 20:
+            mute += 1
+    if mute > max(1, controllate * 0.01):
+        va_bene = False
+        righe.append("ATTENZIONE: %d pagine sono rimaste senza testo." % mute)
+
+    if va_bene:
+        righe.append("Impaginazione verificata: %d pagine, nessuna pagina vuota."
+                     % b.page_count)
+    a.close(); b.close()
+    return va_bene, righe

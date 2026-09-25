@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>Accesso — Ultimate Translator</title>
+<style>
+  :root{
+    --bg:#080412; --panel:#140b26; --line:#2a1b45;
+    --text:#F1EEFF; --muted:#9d8fc4;
+    --accent:#7C3AED; --accent-2:#A78BFA;
+    --ok:#34D399; --err:#F87171; --warn:#FBBF24;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; min-height:100dvh; display:flex; align-items:center;
+    justify-content:center; padding:24px;
+    background:radial-gradient(1200px 600px at 50% -10%, #1e1040 0%, var(--bg) 60%);
+    color:var(--text);
+    font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  }
+  .card{
+    width:100%; max-width:420px; background:var(--panel);
+    border:1px solid var(--line); border-radius:20px; padding:32px 26px;
+    box-shadow:0 24px 60px rgba(0,0,0,.55);
+  }
+  .logo{font-size:34px; text-align:center; margin-bottom:6px}
+  h1{font-size:21px; margin:0 0 4px; text-align:center; letter-spacing:-.02em}
+  .sub{color:var(--muted); font-size:14px; text-align:center; margin:0 0 26px; line-height:1.5}
+  label{display:block; font-size:13px; color:var(--muted); margin-bottom:7px}
+  input{
+    width:100%; padding:14px 15px; font-size:16px; /* 16px: iOS non zooma */
+    background:#0d0720; color:var(--text);
+    border:1px solid var(--line); border-radius:12px; outline:none;
+    font-family:inherit; transition:border-color .15s;
+  }
+  input:focus{border-color:var(--accent-2)}
+  input#code{
+    letter-spacing:.5em; text-align:center; font-size:26px; font-weight:600;
+    padding-left:.5em;
+  }
+  button{
+    width:100%; margin-top:16px; padding:14px; font-size:16px; font-weight:600;
+    color:#fff; background:linear-gradient(135deg,var(--accent),var(--accent-2));
+    border:0; border-radius:12px; cursor:pointer; font-family:inherit;
+  }
+  button:disabled{opacity:.55; cursor:not-allowed}
+  .ghost{background:none; border:1px solid var(--line); color:var(--muted); margin-top:10px}
+  .msg{
+    margin-top:16px; padding:12px 14px; border-radius:10px; font-size:14px;
+    line-height:1.5; display:none;
+  }
+  .msg.show{display:block}
+  .msg.ok{background:rgba(52,211,153,.12); color:var(--ok); border:1px solid rgba(52,211,153,.3)}
+  .msg.err{background:rgba(248,113,113,.12); color:var(--err); border:1px solid rgba(248,113,113,.3)}
+  .msg.warn{background:rgba(251,191,36,.12); color:var(--warn); border:1px solid rgba(251,191,36,.3)}
+  .step{display:none} .step.active{display:block}
+  .foot{margin-top:22px; text-align:center; color:var(--muted); font-size:12px; line-height:1.6}
+  .mailto{color:var(--accent-2); font-weight:600}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">📚</div>
+  <h1>Ultimate Translator</h1>
+  <p class="sub">Portale privato. Inserisci la tua email:<br>ti arriva un codice per entrare.</p>
+
+  {% if not smtp_ready %}
+  <div class="msg warn show">
+    SMTP non configurato: il codice non viene inviato per email, lo trovi nel
+    log del server.
+  </div>
+  {% endif %}
+
+  <form id="step-email" class="step active" autocomplete="on">
+    <label for="email">Email</label>
+    <input id="email" name="email" type="email" inputmode="email"
+           autocomplete="username" placeholder="tu@esempio.com" required>
+    <button type="submit" id="btn-send">Ricevi codice</button>
+  </form>
+
+  <form id="step-code" class="step" autocomplete="off">
+    <label for="code">Codice a 6 cifre</label>
+    <input id="code" name="code" type="text" inputmode="numeric"
+           autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6"
+           placeholder="000000" required>
+    <button type="submit" id="btn-verify">Entra</button>
+    <button type="button" class="ghost" id="btn-back">Cambia email</button>
+  </form>
+
+  <div id="msg" class="msg"></div>
+  <p class="foot">L'accesso resta valido 30 giorni su questo dispositivo.</p>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const msg = $('msg');
+let email = '';
+
+function show(text, kind) {
+  msg.textContent = text;
+  msg.className = 'msg show ' + kind;
+}
+
+function step(name) {
+  $('step-email').classList.toggle('active', name === 'email');
+  $('step-code').classList.toggle('active', name === 'code');
+  if (name === 'code') setTimeout(() => $('code').focus(), 80);
+}
+
+async function post(url, body) {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body),
+  });
+  let data = {};
+  try { data = await res.json(); } catch (e) {}
+  return {res, data};
+}
+
+$('step-email').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  email = $('email').value.trim();
+  const btn = $('btn-send');
+  btn.disabled = true; btn.textContent = 'Invio...';
+  try {
+    const {res, data} = await post('/api/auth/request-otp', {email});
+    show(data.message || 'Errore', res.ok ? 'ok' : 'err');
+    if (res.ok) step('code');
+  } catch (err) {
+    show('Rete non raggiungibile. Riprova.', 'err');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Ricevi codice';
+  }
+});
+
+$('step-code').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = $('btn-verify');
+  btn.disabled = true; btn.textContent = 'Verifica...';
+  try {
+    const {res, data} = await post('/api/auth/verify', {email, code: $('code').value.trim()});
+    if (res.ok) {
+      show('Accesso effettuato. Ti porto dentro...', 'ok');
+      window.location.href = '/';
+      return;
+    }
+    show(data.message || 'Codice errato', 'err');
+    $('code').value = ''; $('code').focus();
+  } catch (err) {
+    show('Rete non raggiungibile. Riprova.', 'err');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Entra';
+  }
+});
+
+$('btn-back').addEventListener('click', () => {
+  step('email');
+  msg.className = 'msg';
+});
+
+// L'OTP arrivato via SMS/email su iOS/Android riempie il campo: invia da solo.
+$('code').addEventListener('input', (e) => {
+  if (e.target.value.replace(/\D/g, '').length === 6) {
+    $('step-code').requestSubmit();
+  }
+});
+</script>
+</body>
+</html>

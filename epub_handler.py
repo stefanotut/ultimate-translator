@@ -12,7 +12,7 @@ import re
 from bs4 import BeautifulSoup, NavigableString, Comment, Tag
 import ebooklib
 from ebooklib import epub
-from translator import translate_text, estimate_tokens
+from translator import translate_text, translate_blocks, estimate_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -145,7 +145,7 @@ def _translate_block_html(
     source_lang: str,
     target_lang: str,
     provider: str = "anthropic",
-    model: str = "claude-sonnet-4-20250514",
+    model: str = "claude-sonnet-5",
     previous_context: str = "",
 ) -> str:
     """
@@ -170,19 +170,250 @@ def _translate_block_html(
 # Chapter translation
 # ---------------------------------------------------------------------------
 
-def translate_html_content(
-    html_content: str,
-    source_lang: str,
-    target_lang: str,
-    provider: str = "anthropic",
-    model: str = "claude-sonnet-4-20250514",
-    progress_callback=None,
-) -> str:
-    """
-    Translate HTML content of an EPUB chapter.
-    """
-    soup = BeautifulSoup(html_content, 'html.parser')
+# Elenchi puntati persi nella conversione.
+#
+# Molti EPUB che girano in rete nascono da una conversione automatica di un PDF
+# o di un DOC. Se l'elenco puntato usava un font di simboli (Wingdings e simili)
+# la conversione perde il font e lascia la LETTERA che in quel font disegnava il
+# pallino. Il risultato, nel libro, e' una riga come:
+#
+#     r  E' fatta di legno.
+#
+# Misurato su un libro vero: 354 righe cosi'. Il difetto e' nel file di
+# partenza, non nella traduzione, ma lasciarlo passare vorrebbe dire consegnare
+# un libro con la stessa bruttura. Qui si rimette il pallino.
+#
+# Le lettere sotto sono quelle che in Wingdings/Symbol disegnano un punto
+# elenco. Si interviene solo quando la riga COMINCIA con quel carattere isolato,
+# seguito da spazio, e poi c'e' del testo vero: cosi' una parola che comincia
+# per "r" non viene mai toccata.
+_LETTERE_PALLINO = {"r", "l", "n", "u", "F", "v", "q", "§", "·", "Ø", "o"}
 
+
+def _ripara_pallini(soup):
+    """Rimette i punti elenco persi dalla conversione. Restituisce quanti."""
+    riparati = 0
+    for p in soup.find_all(["p", "div", "li"]):
+        primo = None
+        for f in p.children:
+            if isinstance(f, NavigableString) and not str(f).strip():
+                continue
+            primo = f
+            break
+        if primo is None or not isinstance(primo, Tag) or primo.name != "span":
+            continue
+        segno = primo.get_text().strip()
+        if segno not in _LETTERE_PALLINO:
+            continue
+        # dopo il segno ci deve essere davvero del testo, e uno stacco
+        resto = p.get_text()[len(segno):]
+        if len(resto.strip()) < 8 or not resto[:1].isspace():
+            continue
+        primo.string = "•"
+        riparati += 1
+    return riparati
+
+
+# Tabelle finte, fatte con gli spazi.
+#
+# La stessa conversione automatica che perde i pallini perde anche le tabelle:
+# al posto di <table> lascia un paragrafo con due <span> separati da una fila di
+# spazi. L'HTML gli spazi li collassa, quindi le due colonne finiscono
+# appiccicate su una riga sola:
+#
+#     Caratteristiche Benefici
+#     E' fatta di legno Si tempera facilmente
+#
+# Misurato su un libro vero: 560 righe cosi'. Le celle pero' sono ancora due
+# <span> distinti, quindi si possono rimettere in colonna.
+#
+# Per non rovinare un paragrafo normale che per caso contiene due <span>, si
+# interviene solo su SERIE di almeno due righe consecutive fatte allo stesso
+# modo: una tabella ha piu' di una riga, una frase no.
+def _ripara_finte_colonne(soup):
+    """Rimette in colonna le tabelle appiattite dalla conversione. Torna quante righe."""
+    def e_riga(tag):
+        if not isinstance(tag, Tag) or tag.name != "p":
+            return 0
+        celle = [f for f in tag.children if isinstance(f, Tag)]
+        if len(celle) < 2 or any(c.name != "span" for c in celle):
+            return 0
+        # fra una cella e l'altra ci deve essere solo spazio
+        for f in tag.children:
+            if isinstance(f, NavigableString) and f.strip():
+                return 0
+        if any(not c.get_text(strip=True) for c in celle):
+            return 0
+        return len(celle)
+
+    riparate = 0
+    for genitore in soup.find_all(True):
+        figli = [f for f in genitore.children if isinstance(f, Tag)]
+        i = 0
+        while i < len(figli):
+            n = e_riga(figli[i])
+            if not n:
+                i += 1
+                continue
+            j = i
+            while j < len(figli) and e_riga(figli[j]) == n:
+                j += 1
+            if j - i >= 2:                       # almeno due righe: e' una tabella
+                for riga in figli[i:j]:
+                    stile = riga.get("style", "")
+                    riga["style"] = (stile + ";" if stile else "") + \
+                        "display:grid;grid-template-columns:repeat(%d,1fr);gap:0 1.5em" % n
+                    riparate += 1
+            i = max(j, i + 1)
+    return riparate
+
+
+def _scrivi_conservando_il_pacchetto(originale, destinazione, tradotti, lingua):
+    """Riscrive l'EPUB copiando l'originale e sostituendo SOLO il corpo tradotto.
+
+    Perche' esiste.
+    --------------
+    `epub.write_epub` non riscrive il pacchetto: lo RIGENERA. E rigenerando la
+    testa di ogni pagina la perde. Misurato su un libro vero:
+
+        originale   379 pagine, 756 <link rel=stylesheet>, 379 <title>,
+                    378 <body class=...>
+        rigenerato  379 pagine,   0 <link>,                  0 <title>,
+                      0 <body class=...>
+
+    I due file .css restavano dentro il pacchetto, ma nessuna pagina li
+    richiamava piu': il libro tradotto perdeva rientri, centrature, margini,
+    corpo dei titoli — tutto cio' che non fosse scritto inline. E' questa la
+    causa vera dell'"impaginazione strana", non il file di partenza.
+
+    Qui invece si copia l'archivio originale voce per voce, byte per byte, e si
+    tocca soltanto il contenuto di <body> delle pagine tradotte. Tutto il resto
+    — testa, fogli di stile, font, immagini, indice, OPF — resta identico.
+
+    `tradotti` e' {nome_del_file_nell_epub: soup_tradotta}.
+    """
+    import zipfile
+
+    def corpo_di(html):
+        i = html.lower().find('<body')
+        if i < 0:
+            return None
+        j = html.find('>', i)
+        k = html.lower().rfind('</body>')
+        return (i, j, k) if j > 0 and k > j else None
+
+    with zipfile.ZipFile(originale) as zin, \
+            zipfile.ZipFile(destinazione, 'w', zipfile.ZIP_DEFLATED) as zout:
+        for info in zin.infolist():
+            dati = zin.read(info.filename)
+            soup = tradotti.get(info.filename)
+
+            if soup is not None:
+                vecchio = dati.decode('utf-8', 'replace')
+                punti = corpo_di(vecchio)
+                nuovo_corpo = soup.body.decode_contents() if soup.body else str(soup)
+                if punti:
+                    i, j, k = punti
+                    # si sostituisce solo cio' che sta FRA <body ...> e </body>:
+                    # gli attributi del body (le classi che reggono i margini)
+                    # restano quelli dell'originale.
+                    dati = (vecchio[:j + 1] + nuovo_corpo + vecchio[k:]).encode('utf-8')
+                else:
+                    dati = str(soup).encode('utf-8')
+
+            elif info.filename.lower().endswith('.opf') and lingua:
+                testo = dati.decode('utf-8', 'replace')
+                nuovo = re.sub(r'(<dc:language[^>]*>)[^<]*(</dc:language>)',
+                               r'\g<1>%s\g<2>' % lingua, testo, count=1)
+                if nuovo != testo:
+                    dati = nuovo.encode('utf-8')
+
+            # `mimetype` deve restare non compresso, altrimenti l'EPUB non e' valido
+            zout.writestr(info, dati,
+                          zipfile.ZIP_STORED if info.filename == 'mimetype'
+                          else zipfile.ZIP_DEFLATED)
+
+
+def controlla_fedelta(originale, tradotto):
+    """Confronta la FORMA del libro tradotto con quella dell'originale.
+
+    Non guarda le parole: guarda l'ossatura. Se il tradotto ha meno capitoli,
+    meno paragrafi, meno titoli o meno immagini dell'originale, qualcosa si e'
+    perso per strada — e va detto subito, nella scheda del libro, invece di
+    farlo scoprire all'utente dieci pagine dopo.
+
+    Restituisce (va_bene, righe_da_scrivere_nel_registro).
+    """
+    def conta(percorso):
+        # ATTENZIONE: l'archivio si legge con zipfile, NON con ebooklib.
+        # `get_content()` rigenera la testa della pagina da un modello, quindi
+        # riporterebbe zero <link> e zero <title> anche per l'originale: il
+        # controllo non scatterebbe mai proprio dove il danno e' totale.
+        import zipfile
+        n = {'sezioni': 0, 'paragrafi': 0, 'titoli': 0, 'immagini': 0,
+             'elenchi': 0, 'caratteri': 0, 'fogli_di_stile': 0, 'intestazioni': 0}
+        with zipfile.ZipFile(percorso) as z:
+            for nome in z.namelist():
+                if not nome.lower().endswith(('.html', '.xhtml', '.htm')):
+                    continue
+                n['sezioni'] += 1
+                testo = z.read(nome).decode('utf-8', 'replace')
+                n['fogli_di_stile'] += len(re.findall(r'<link[^>]+stylesheet', testo, re.I))
+                n['intestazioni'] += len(re.findall(r'<title', testo, re.I))
+                s = BeautifulSoup(testo, 'html.parser')
+                n['paragrafi'] += len(s.find_all('p'))
+                n['titoli'] += len(s.find_all(['h1', 'h2', 'h3', 'h4']))
+                n['immagini'] += len(s.find_all('img'))
+                n['elenchi'] += len(s.find_all('li'))
+                n['caratteri'] += len(s.get_text(' ', strip=True))
+        return n
+
+    try:
+        a, b = conta(originale), conta(tradotto)
+    except Exception as e:
+        return True, ['Controllo di fedelta\' non eseguito: %s' % str(e)[:120]]
+
+    righe = []
+    va_bene = True
+    # I collegamenti ai fogli di stile sono la cosa piu' importante da guardare:
+    # perderli significa perdere rientri, centrature e margini, cioe' tutta
+    # l'impaginazione, pur restando il testo al suo posto. Qui basta UNA perdita.
+    if a['fogli_di_stile'] and b['fogli_di_stile'] < a['fogli_di_stile']:
+        va_bene = False
+        righe.append("ATTENZIONE: persi %d collegamenti ai fogli di stile su %d: "
+                     "il libro perde rientri, centrature e margini."
+                     % (a['fogli_di_stile'] - b['fogli_di_stile'], a['fogli_di_stile']))
+
+    for chiave, etichetta in (('sezioni', 'capitoli'), ('paragrafi', 'paragrafi'),
+                              ('titoli', 'titoli'), ('immagini', 'immagini'),
+                              ('elenchi', 'voci di elenco')):
+        if a[chiave] and b[chiave] < a[chiave]:
+            persi = a[chiave] - b[chiave]
+            # Uno o due elementi di scarto capitano per differenze di parsing;
+            # oltre l'1% e' una perdita vera.
+            if persi > max(2, a[chiave] * 0.01):
+                va_bene = False
+                righe.append('ATTENZIONE: %d %s in meno rispetto all\'originale '
+                             '(%d contro %d)' % (persi, etichetta, b[chiave], a[chiave]))
+
+    # Il testo tradotto in italiano e' quasi sempre PIU' lungo dell'inglese.
+    # Se e' molto piu' corto, e' segno che qualcosa non e' stato tradotto o e'
+    # andato perso.
+    if a['caratteri'] and b['caratteri'] < a['caratteri'] * 0.85:
+        va_bene = False
+        righe.append('ATTENZIONE: il testo tradotto e\' piu\' corto del previsto '
+                     '(%d caratteri contro %d)' % (b['caratteri'], a['caratteri']))
+
+    if va_bene:
+        righe.append('Impaginazione verificata: %d capitoli, %d paragrafi, %d titoli, '
+                     '%d immagini, %d fogli di stile collegati — come l\'originale.'
+                     % (b['sezioni'], b['paragrafi'], b['titoli'], b['immagini'],
+                        b['fogli_di_stile']))
+    return va_bene, righe
+
+
+def _collect_blocks(soup):
+    """Return the leaf block tags whose inner HTML should be translated."""
     blocks = []
     for tag in soup.find_all(True):
         if tag.name in SKIP_TAGS:
@@ -204,39 +435,41 @@ def translate_html_content(
             if isinstance(desc, Tag) and id(desc) in block_set and id(desc) != id(block):
                 has_child_block = True
                 break
-        if not has_child_block:
+        if not has_child_block and _is_translatable(block.decode_contents()):
             filtered_blocks.append(block)
 
-    total = len(filtered_blocks)
-    translated_count = 0
-    previous_translated = ""
+    return filtered_blocks
 
-    for block in filtered_blocks:
-        inner_html = block.decode_contents()
-        if not _is_translatable(inner_html):
-            continue
 
-        translated_html = _translate_block_html(
-            inner_html,
-            source_lang,
-            target_lang,
-            provider=provider,
-            model=model,
-            previous_context=previous_translated,
-        )
+def _apply_translation(block, translated_html):
+    """Replace a tag's inner HTML, keeping the tag itself and its attributes."""
+    new_contents = BeautifulSoup(translated_html, 'html.parser')
+    block.clear()
+    for child in list(new_contents.children):
+        block.append(copy.copy(child))
 
-        plain_translated = BeautifulSoup(translated_html, 'html.parser').get_text()
-        previous_translated = plain_translated
 
-        new_contents = BeautifulSoup(translated_html, 'html.parser')
-        block.clear()
-        for child in list(new_contents.children):
-            block.append(copy.copy(child))
+def translate_html_content(
+    html_content: str,
+    source_lang: str,
+    target_lang: str,
+    provider: str = "anthropic",
+    model: str = "claude-sonnet-5",
+    progress_callback=None,
+) -> str:
+    """Translate a single chapter's HTML (used standalone / by tests)."""
+    soup = BeautifulSoup(html_content, 'html.parser')
+    blocks = _collect_blocks(soup)
+    if not blocks:
+        return str(soup)
 
-        translated_count += 1
-        if progress_callback and total > 0:
-            progress_callback(translated_count, total)
-
+    translated = translate_blocks(
+        [b.decode_contents() for b in blocks],
+        source_lang, target_lang, provider=provider, model=model,
+        progress_callback=progress_callback,
+    )
+    for block, html in zip(blocks, translated):
+        _apply_translation(block, html)
     return str(soup)
 
 
@@ -250,7 +483,7 @@ def translate_epub(
     source_lang: str = "English",
     target_lang: str = "Italian",
     provider: str = "anthropic",
-    model: str = "claude-sonnet-4-20250514",
+    model: str = "claude-sonnet-5",
     progress_callback=None,
 ):
     """
@@ -272,54 +505,103 @@ def translate_epub(
             progress_callback(1.0, "Completato! (nessun contenuto testuale trovato)")
         return
 
+    # Si raccolgono i blocchi di TUTTO il libro prima di tradurre: cosi' il
+    # motore puo' raggrupparli e mandarli in parallelo senza fermarsi al
+    # confine di ogni capitolo. E' qui che si guadagna il grosso del tempo.
+    soups = {}
+    all_blocks = []          # elementi (doc_idx, tag)
+    pallini = 0              # punti elenco rimessi a posto (vedi _ripara_pallini)
     for doc_idx, item in enumerate(documents):
         try:
             content = item.get_content().decode('utf-8', errors='replace')
         except Exception as e:
-            logger.warning(f"  Could not decode document {doc_idx + 1}: {e}")
+            logger.warning("Documento %d non decodificabile: %s", doc_idx + 1, e)
             continue
-
         if not _is_translatable(_extract_text_sample(content)):
-            logger.info(f"  Skipping document {doc_idx + 1}/{total_docs} (no translatable text)")
-            if progress_callback:
-                progress_callback(
-                    (doc_idx + 1) / total_docs,
-                    f"Capitolo {doc_idx + 1}/{total_docs} - Saltato (nessun testo)"
-                )
             continue
+        soup = BeautifulSoup(content, 'html.parser')
+        pallini += _ripara_pallini(soup)
+        soups[doc_idx] = soup
+        for tag in _collect_blocks(soup):
+            all_blocks.append((doc_idx, tag))
 
-        logger.info(f"  Translating document {doc_idx + 1}/{total_docs}: {item.get_name()}")
+    total_blocks = len(all_blocks)
+    logger.info("EPUB: %d capitoli, %d blocchi da tradurre", total_docs, total_blocks)
+    if pallini:
+        logger.info("EPUB: %d punti elenco rimessi (erano lettere lasciate dalla "
+                    "conversione del file di partenza)", pallini)
 
-        def chapter_progress(current, total, _doc_idx=doc_idx):
-            if progress_callback:
-                overall = (_doc_idx / total_docs) + (current / max(total, 1) / total_docs)
-                progress_callback(
-                    min(overall, 0.99),
-                    f"Capitolo {_doc_idx + 1}/{total_docs} - Blocco {current}/{total}"
-                )
+    if total_blocks == 0:
+        epub.write_epub(output_path, book)
+        if progress_callback:
+            progress_callback(1.0, "Completato! (nessun testo trovato)")
+        return
 
+    def on_progress(done, total):
+        if progress_callback:
+            # Si lascia l'ultimo 3% alla riscrittura e al salvataggio del file.
+            progress_callback(min(done / max(total, 1) * 0.97, 0.97),
+                              "Tradotti %d/%d blocchi" % (done, total))
+
+    translated = translate_blocks(
+        [tag.decode_contents() for _, tag in all_blocks],
+        source_lang, target_lang, provider=provider, model=model,
+        progress_callback=on_progress,
+    )
+
+    if progress_callback:
+        progress_callback(0.98, "Ricostruzione capitoli...")
+
+    for (doc_idx, tag), html in zip(all_blocks, translated):
         try:
-            translated_content = translate_html_content(
-                content, source_lang, target_lang,
-                provider=provider, model=model,
-                progress_callback=chapter_progress
-            )
-            item.set_content(translated_content.encode('utf-8'))
+            _apply_translation(tag, html)
         except Exception as e:
-            logger.error(f"  Error translating document {doc_idx + 1}: {e}")
-            if progress_callback:
-                progress_callback(
-                    (doc_idx + 1) / total_docs,
-                    f"Capitolo {doc_idx + 1}/{total_docs} - ERRORE: {str(e)[:60]}"
-                )
+            logger.error("Blocco non riscritto nel capitolo %d: %s", doc_idx + 1, e)
+
+    # Le tabelle finte si rimettono in colonna DOPO la traduzione: prima le celle
+    # sono separate da file di spazi che il modello puo' restituire diversamente.
+    colonne = 0
+    for soup in soups.values():
+        colonne += _ripara_finte_colonne(soup)
+    if colonne:
+        logger.info("EPUB: %d righe rimesse in colonna (tabelle che la conversione "
+                    "del file di partenza aveva appiattito)", colonne)
 
     if progress_callback:
         progress_callback(0.99, "Salvataggio EPUB...")
 
     lang_code = target_lang[:2].lower() if len(target_lang) > 2 else target_lang.lower()
-    book.set_language(lang_code)
 
-    epub.write_epub(output_path, book)
+    # Si riscrive copiando l'archivio originale invece di rigenerarlo con
+    # ebooklib: rigenerandolo si perdevano i collegamenti ai fogli di stile e con
+    # essi tutta l'impaginazione del libro. Vedi
+    # _scrivi_conservando_il_pacchetto per la misura.
+    import zipfile as _zip
+    with _zip.ZipFile(input_path) as _z:
+        nomi = _z.namelist()
+
+    def nome_nell_archivio(item):
+        atteso = item.get_name()
+        if atteso in nomi:
+            return atteso
+        coda = atteso.split('/')[-1]
+        for n in nomi:
+            if n.split('/')[-1] == coda:
+                return n
+        return None
+
+    tradotti = {}
+    mancanti = 0
+    for doc_idx, soup in soups.items():
+        n = nome_nell_archivio(documents[doc_idx])
+        if n:
+            tradotti[n] = soup
+        else:
+            mancanti += 1
+    if mancanti:
+        logger.warning("EPUB: %d capitoli non ritrovati nell'archivio originale", mancanti)
+
+    _scrivi_conservando_il_pacchetto(input_path, output_path, tradotti, lang_code)
     logger.info(f"Translated EPUB saved to: {output_path}")
 
     if progress_callback:

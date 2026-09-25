@@ -1,0 +1,2323 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>{{ titolo }}</title>
+<style>
+  :root{
+    --carta:#faf7f0; --inchiostro:#1a1714; --tenue:#8a8178;
+    --barra:rgba(250,247,240,.94); --linea:rgba(0,0,0,.10);
+    --accento:#7C3AED;
+  }
+  [data-tema="sepia"]{ --carta:#f4ecd8; --inchiostro:#3a2f1e; --tenue:#8a7a5e;
+                       --barra:rgba(244,236,216,.94); --linea:rgba(0,0,0,.12) }
+  [data-tema="notte"]{ --carta:#101014; --inchiostro:#ddd8d0; --tenue:#7c7770;
+                       --barra:rgba(16,16,20,.94); --linea:rgba(255,255,255,.10) }
+  *{box-sizing:border-box}
+  html,body{height:100%; margin:0; overscroll-behavior:none}
+  body{
+    background:var(--carta); color:var(--inchiostro);
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    -webkit-text-size-adjust:100%;
+  }
+
+  /* ---- barre ---- */
+  .barra{
+    position:fixed; left:0; right:0; z-index:40;
+    background:var(--barra); backdrop-filter:blur(18px);
+    display:flex; align-items:center; gap:6px; padding:8px 10px;
+    transition:transform .25s ease, opacity .25s ease;
+  }
+  .barra.alto{top:0; border-bottom:1px solid var(--linea);
+              padding-top:calc(8px + env(safe-area-inset-top))}
+  .barra.basso{bottom:0; border-top:1px solid var(--linea);
+               padding-bottom:calc(8px + env(safe-area-inset-bottom))}
+  body.immersivo .barra{transform:translateY(var(--fuga)); opacity:0; pointer-events:none}
+  /* Tranne quella d'ascolto: sparire col tasto pausa mentre si guida non e' una
+     modalita' immersiva, e' un problema. */
+  body.immersivo .barra.ascolto{transform:none; opacity:1; pointer-events:auto}
+  .barra.alto{--fuga:-110%} .barra.basso{--fuga:110%}
+
+  .ic{
+    background:none; border:0; color:var(--inchiostro); cursor:pointer;
+    padding:9px 11px; border-radius:10px; font-size:16px; line-height:1;
+    font-family:inherit; white-space:nowrap;
+  }
+  .ic:hover{background:rgba(127,127,127,.14)}
+  #spesa-voce{position:fixed;left:10px;bottom:64px;z-index:40;
+ font-size:.74rem;color:var(--om,#888);background:color-mix(in srgb,Canvas 86%,transparent);
+ padding:3px 8px;border-radius:8px;pointer-events:none;font-variant-numeric:tabular-nums}
+#spesa-voce.attenzione{color:#b8860b}
+#spesa-voce.forte{color:#c0392b;font-weight:600}
+.titolo{
+    flex:1; font-size:13.5px; font-weight:600; text-align:center;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    color:var(--tenue); padding:0 4px;
+  }
+  .quanto{font-size:12.5px; color:var(--tenue); min-width:44px; text-align:right}
+
+  #avanzamento{
+    position:fixed; left:0; bottom:0; height:3px; background:var(--accento);
+    z-index:45; transition:width .3s ease; pointer-events:none;
+  }
+
+  /* ---- area di lettura ---- */
+  #zona{position:fixed; inset:0; top:0}
+  foliate-view{width:100%; height:100%; display:block}
+
+  #pdf{
+    position:absolute; inset:0; overflow-y:auto; overflow-x:hidden;
+    padding:58px 0 70px; -webkit-overflow-scrolling:touch;
+  }
+  .pagina{position:relative; margin:0 auto 14px; box-shadow:0 2px 14px rgba(0,0,0,.16);
+          background:#fff; max-width:100%}
+  .pagina canvas{display:block; width:100%; height:auto}
+  /* Lo strato di testo serve solo a poter selezionare: deve essere invisibile.
+     A opacita' 0,25 (il valore di esempio di pdf.js) si vedevano rettangoli
+     grigi dietro ogni riga. */
+  .strato-testo{
+    position:absolute; inset:0; overflow:hidden; line-height:1; opacity:1;
+    -webkit-user-select:text; user-select:text;
+  }
+  .strato-testo span{
+    position:absolute; white-space:pre; transform-origin:0 0;
+    color:transparent !important; background:transparent !important;
+  }
+  .strato-testo ::selection{background:rgba(124,58,237,.35)}
+  /* Pagina tradotta su richiesta (PDF scansionati): un'immagine con lo stesso
+     sfondo, le stesse illustrazioni e il testo in italiano, sopra l'originale.
+     Un tocco sul pulsante la scambia con l'originale per confrontarli. */
+  .pagina img.tradotta{position:absolute; inset:0; width:100%; height:100%;
+    display:block; z-index:2}
+  .pagina.mostra-originale img.tradotta{display:none}
+  /* i segni (evidenziazioni, frase in ascolto) stanno SOPRA la pagina tradotta */
+  .pagina .segno{z-index:3}
+  /* l'avviso di guasto deve stare sopra #pdf (posizionato): altrimenti si
+     dipinge sotto e i pulsanti non ricevono i tocchi */
+  #zona > .vuoto{position:relative; z-index:3}
+  #btn-traduci.lavora{opacity:.55; pointer-events:none}
+  #menu-traduci{position:fixed; right:8px; top:calc(env(safe-area-inset-top) + 50px);
+    z-index:46; min-width:250px; background:var(--barra); border:1px solid var(--linea);
+    border-radius:12px; box-shadow:0 8px 28px rgba(0,0,0,.28); padding:6px; display:flex;
+    flex-direction:column; gap:2px}
+  #menu-traduci button{font:inherit; font-size:14px; text-align:left; color:var(--inchiostro);
+    background:transparent; border:0; border-radius:8px; padding:10px 12px; cursor:pointer;
+    -webkit-tap-highlight-color:transparent}
+  #menu-traduci button:active{background:rgba(124,58,237,.12)}
+  #menu-traduci button[disabled]{opacity:.45; cursor:default}
+  #menu-traduci .nota{font-size:11.5px; color:var(--tenue); padding:4px 12px 6px}
+  #btn-traduci.fatta{box-shadow:inset 0 -3px 0 #2a9d5c}
+  #avviso-pagina{position:fixed; left:50%; transform:translateX(-50%); bottom:64px;
+    z-index:44; max-width:520px; background:var(--barra); border:1px solid var(--linea);
+    border-radius:12px; padding:10px 14px; font-size:12.5px; line-height:1.5;
+    color:var(--tenue); box-shadow:0 6px 24px rgba(0,0,0,.25)}
+  .segno{position:absolute; background:rgba(255,214,64,.45); border-radius:2px;
+         pointer-events:none; mix-blend-mode:multiply}
+  /* La frase in ascolto sul PDF: stesso viola dell'EPUB, per non confonderla
+     con le sottolineature gialle salvate. */
+  .segno-voce{background:rgba(124,58,237,.28)}
+
+  /* ---- pannelli ---- */
+  .velo{position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:50; display:none}
+  .velo.on{display:block}
+  .pannello{
+    position:fixed; z-index:51; background:var(--carta); color:var(--inchiostro);
+    box-shadow:0 -8px 40px rgba(0,0,0,.3);
+    left:0; right:0; bottom:0; max-height:78vh; overflow-y:auto;
+    border-radius:18px 18px 0 0; padding:16px 16px calc(20px + env(safe-area-inset-bottom));
+    transform:translateY(101%); transition:transform .26s cubic-bezier(.2,.8,.2,1);
+  }
+  .pannello.on{transform:none}
+  @media (min-width:820px){
+    .pannello{left:auto; right:0; top:0; bottom:0; width:380px; max-height:none;
+              border-radius:0; transform:translateX(101%)}
+    .pannello.on{transform:none}
+  }
+  .pannello h3{margin:2px 0 14px; font-size:16px}
+  .voce{
+    display:block; width:100%; text-align:left; background:none; border:0;
+    color:inherit; font:inherit; padding:11px 8px; border-radius:9px; cursor:pointer;
+    border-bottom:1px solid var(--linea);
+  }
+  .voce:hover{background:rgba(127,127,127,.1)}
+  .voce small{display:block; color:var(--tenue); font-size:11.5px; margin-top:3px}
+
+  .riga-opz{display:flex; align-items:center; gap:10px; margin:14px 0}
+  .riga-opz label{font-size:13px; color:var(--tenue); width:96px}
+  .scelte{display:flex; gap:8px; flex-wrap:wrap; flex:1}
+  .scelta{
+    padding:9px 14px; border-radius:10px; border:1px solid var(--linea);
+    background:none; color:inherit; cursor:pointer; font:inherit; font-size:13.5px;
+  }
+  .scelta.on{background:var(--accento); border-color:var(--accento); color:#fff}
+
+  /* ---- fumetto di selezione ---- */
+  #fumetto{
+    position:fixed; z-index:60; display:none; gap:6px; padding:7px;
+    background:#232028; border-radius:13px; box-shadow:0 8px 30px rgba(0,0,0,.4);
+    align-items:center;
+  }
+  #fumetto.on{display:flex}
+  .pastello{width:27px; height:27px; border-radius:50%; border:2px solid rgba(255,255,255,.25);
+            cursor:pointer; padding:0}
+  #fumetto .ic{color:#fff; font-size:14px; padding:7px 9px}
+
+  .nota-box{width:100%; min-height:92px; padding:11px; border-radius:11px;
+            border:1px solid var(--linea); background:transparent; color:inherit;
+            font:inherit; font-size:15px; resize:vertical}
+  .primario{background:var(--accento); color:#fff; border:0; padding:11px 16px;
+            border-radius:11px; font:inherit; font-weight:600; cursor:pointer; width:100%;
+            margin-top:10px}
+  .vuoto{color:var(--tenue); text-align:center; padding:34px 10px; font-size:14px; line-height:1.6}
+  .evid{border-left:3px solid #ffd640; padding-left:10px}
+
+  /* ---- ascolto ---- */
+  /* `.barra` porta display:flex, che vince sul display:none del browser per
+     l'attributo hidden: senza questa riga una barra "nascosta" restava a video.
+     Vale per tutte le barre, non solo per questa. */
+  .barra[hidden]{display:none}
+  /* Attenzione al nome della classe: `voce` era gia' presa dalle righe dei
+     pannelli (`.voce{display:block}`) e vinceva sul flex della barra,
+     impilando i comandi uno sotto l'altro. */
+  .barra.ascolto{flex-wrap:nowrap}
+  .barra.ascolto .titolo{min-width:0}
+  .ic.grande{font-size:21px; padding:7px 13px}
+  .ic.attivo{color:var(--accento)}
+  .voce-riga{
+    display:flex; align-items:center; gap:10px; width:100%; text-align:left;
+    background:none; border:0; color:inherit; font:inherit; cursor:pointer;
+    padding:10px 8px; border-radius:10px; border-bottom:1px solid var(--linea);
+  }
+  .voce-riga:hover{background:rgba(127,127,127,.1)}
+  .voce-riga.on{background:rgba(124,58,237,.14)}
+  .voce-riga b{font-size:14.5px}
+  .voce-riga small{display:block; color:var(--tenue); font-size:11.5px; margin-top:2px}
+  .voce-prova{
+    margin-left:auto; flex:0 0 auto; border:1px solid var(--linea); border-radius:9px;
+    background:none; color:inherit; font:inherit; font-size:12px; padding:6px 10px;
+    cursor:pointer;
+  }
+</style>
+</head>
+<body data-tema="chiaro">
+
+<div id="zona"></div>
+
+<div class="barra alto" id="barra-alto">
+  <button class="ic" onclick="location.href='/libreria'" title="Torna alla libreria">‹</button>
+  <div class="titolo">{{ titolo }}</div>
+  <button class="ic" id="btn-traduci" title="Traduci questa pagina in italiano" hidden>🇮🇹</button>
+  <button class="ic" id="btn-ascolta" title="Ascolta il libro">🎧</button>
+  <button class="ic" id="btn-indice" title="Indice">☰</button>
+  <button class="ic" id="btn-appunti" title="Evidenziazioni e note">✎</button>
+  <button class="ic" id="btn-aspetto" title="Aspetto">Aa</button>
+</div>
+
+<div class="barra basso" id="barra-basso">
+  <button class="ic" id="btn-prec" title="Pagina precedente">‹</button>
+  <div class="titolo" id="posizione">…</div>
+  <div class="quanto" id="percento">0%</div>
+  <button class="ic" id="btn-succ" title="Pagina successiva">›</button>
+</div>
+
+<!-- Durante l'ascolto questa barra prende il posto di quella di lettura: due
+     barre su un telefono sono una di troppo, e in macchina i tasti devono
+     essere grandi e pochi. -->
+<div class="barra basso ascolto" id="barra-voce" hidden>
+  <button class="ic" id="voce-indietro" title="Frase precedente">⏮</button>
+  <button class="ic grande" id="voce-play" title="Ascolta">▶</button>
+  <button class="ic" id="voce-avanti" title="Frase successiva">⏭</button>
+  <div class="titolo" id="voce-stato">Pronto ad ascoltare</div>
+  <button class="ic" id="voce-velocita" title="Velocità">1,0×</button>
+  <button class="ic" id="voce-scelta" title="Scegli la voce">🗣</button>
+  <button class="ic" id="voce-chiudi" title="Torna a leggere">✕</button>
+</div>
+<div id="avanzamento" style="width:0"></div>
+
+<div class="velo" id="velo"></div>
+
+<div class="pannello" id="pan-indice"><h3>Indice</h3><div id="lista-indice"></div></div>
+
+<!-- Quanto costa ascoltare, dove si ascolta. Senza questo l'unico modo di
+     saperlo sarebbe guardare i log del server: cioe' mai. -->
+<div id="spesa-voce" hidden></div>
+
+<div class="pannello" id="pan-appunti">
+  <h3>Evidenziazioni e note</h3>
+  <div id="lista-appunti"></div>
+</div>
+
+<div class="pannello" id="pan-voce">
+  <h3>Voce</h3>
+  <div class="riga-opz" style="margin-top:0">
+    <label>Velocità</label>
+    <input id="voce-cursore" type="range" min="0.6" max="2" step="0.05" value="1"
+           style="flex:1;accent-color:var(--accento)">
+    <span class="quanto" id="voce-cursore-val">1,0×</span>
+  </div>
+  <div id="lista-voci"></div>
+  <div class="vuoto" id="voce-nota" style="padding:14px 4px 4px;font-size:12.5px"></div>
+</div>
+
+<div class="pannello" id="pan-aspetto">
+  <h3>Aspetto</h3>
+  <div class="riga-opz"><label>Tema</label><div class="scelte" id="temi">
+    <button class="scelta" data-tema="chiaro">Chiaro</button>
+    <button class="scelta" data-tema="sepia">Sepia</button>
+    <button class="scelta" data-tema="notte">Notte</button>
+  </div></div>
+  <div class="riga-opz"><label>Testo</label><div class="scelte">
+    <button class="scelta" id="testo-meno">A−</button>
+    <button class="scelta" id="testo-piu">A+</button>
+    <span style="align-self:center;color:var(--tenue);font-size:13px" id="testo-val"></span>
+  </div></div>
+  <div class="riga-opz" id="riga-colonne"><label>Pagina</label><div class="scelte" id="colonne">
+    <button class="scelta" data-col="paginato">Sfoglia</button>
+    <button class="scelta" data-col="scorrimento">Scorri</button>
+  </div></div>
+</div>
+
+<div class="pannello" id="pan-nota">
+  <h3>Appunto</h3>
+  <p id="nota-brano" style="color:var(--tenue);font-size:13.5px;line-height:1.5"
+     class="evid"></p>
+  <textarea class="nota-box" id="nota-testo" placeholder="Scrivi qui il tuo appunto..."></textarea>
+  <button class="primario" id="nota-salva">Salva</button>
+</div>
+
+<div id="fumetto">
+  <button class="pastello" data-colore="#ffd640" style="background:#ffd640"></button>
+  <button class="pastello" data-colore="#8ce99a" style="background:#8ce99a"></button>
+  <button class="pastello" data-colore="#74c0fc" style="background:#74c0fc"></button>
+  <button class="pastello" data-colore="#ffa8a8" style="background:#ffa8a8"></button>
+  <button class="ic" id="fum-ascolta" title="Fai partire la voce da qui">🎧 da qui</button>
+  <button class="ic" id="fum-nota">✎ Nota</button>
+  <button class="ic" id="fum-copia">⧉</button>
+</div>
+
+<script type="module">
+const JOB = {{ job_id|tojson }};
+const FORMATO = {{ formato|tojson }};
+
+// Sessione scaduta -> login, invece di errori incomprensibili.
+(function () {
+  const f = window.fetch.bind(window);
+  window.fetch = async (...a) => {
+    const r = await f(...a);
+    if (r.status === 401) { location.href = '/login'; throw new Error('sessione'); }
+    return r;
+  };
+})();
+
+const $ = (id) => document.getElementById(id);
+const velo = $('velo');
+const pannelli = ['pan-indice', 'pan-appunti', 'pan-aspetto', 'pan-nota', 'pan-voce'];
+
+function apri(id) {
+  pannelli.forEach(p => $(p).classList.toggle('on', p === id));
+  velo.classList.add('on');
+}
+function chiudi() {
+  pannelli.forEach(p => $(p).classList.remove('on'));
+  velo.classList.remove('on');
+}
+velo.addEventListener('click', chiudi);
+
+// ---- preferenze locali (restano su questo dispositivo) --------------------
+const PREF = JSON.parse(localStorage.getItem('ut-lettura') || '{}');
+function salvaPref() { localStorage.setItem('ut-lettura', JSON.stringify(PREF)); }
+PREF.tema = PREF.tema || 'chiaro';
+PREF.dim = PREF.dim || 100;
+// `scelto` vale solo se l'utente ha davvero toccato il selettore: serve per
+// poter adattare il libro senza sovrascrivere una sua decisione.
+const COLONNE_SCELTE_DA_LUI = !!PREF.col;
+PREF.col = PREF.col || 'paginato';
+
+function applicaTema() {
+  document.body.dataset.tema = PREF.tema;
+  document.querySelectorAll('#temi .scelta').forEach(b =>
+    b.classList.toggle('on', b.dataset.tema === PREF.tema));
+  document.querySelectorAll('#colonne .scelta').forEach(b =>
+    b.classList.toggle('on', b.dataset.col === PREF.col));
+  $('testo-val').textContent = PREF.dim + '%';
+}
+applicaTema();
+
+// ---- stato ---------------------------------------------------------------
+let motore = null;          // 'epub' | 'pdf'
+let annotazioni = [];
+let selezione = null;       // {testo, posizione, capitolo, percento}
+let ultimoSalvataggio = 0;
+let posCorrente = { location: null, percent: 0, label: '' };
+// Vero mentre il lettore si sta posizionando sul segnalibro all'apertura: in
+// quel momento foliate emette un relocate col CFI di INIZIO PAGINA, che
+// sovrascriverebbe sul server la frase esatta lasciata dall'ascolto. E'
+// irreversibile, ed e' il "torna indietro" che si vede riaprendo il libro.
+let ripresaInCorso = false;
+
+async function api(url, opts) {
+  const r = await fetch(url, opts);
+  try { return await r.json(); } catch (e) { return {}; }
+}
+
+function segnaAvanzamento(percento, etichetta) {
+  const p = Math.max(0, Math.min(1, percento || 0));
+  $('avanzamento').style.width = (p * 100) + '%';
+  $('percento').textContent = Math.round(p * 100) + '%';
+  if (etichetta) $('posizione').textContent = etichetta;
+}
+
+// Il segnalibro si salva al massimo ogni 2 s: scrivere a ogni pixel di
+// scorrimento sarebbe inutile e martellerebbe il database.
+function salvaPosizione(location, percent, label) {
+  posCorrente = { location, percent, label };
+  const ora = Date.now();
+  if (ora - ultimoSalvataggio < 2000) return;
+  ultimoSalvataggio = ora;
+  api('/api/book/' + JOB + '/progress', {
+    method: 'PUT', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ location, percent, label }),
+  });
+}
+// Salvataggio immediato, senza aspettare i 2 secondi: si usa quando si smette
+// di ascoltare o la pagina sta per sparire, dove "fra poco" vuol dire "mai".
+function salvaSubito() {
+  if (!posCorrente.location) return;
+  ultimoSalvataggio = 0;
+  salvaPosizione(posCorrente.location, posCorrente.percent, posCorrente.label);
+}
+
+// Chiudendo la pagina si salva comunque l'ultima posizione.
+addEventListener('visibilitychange', () => {
+  if (document.hidden && posCorrente.location) {
+    const b = new Blob([JSON.stringify(posCorrente)], {type: 'application/json'});
+    navigator.sendBeacon('/api/book/' + JOB + '/progress', b);
+  }
+});
+
+// ---- annotazioni ---------------------------------------------------------
+async function caricaAnnotazioni() {
+  const d = await api('/api/book/' + JOB + '/annotations');
+  annotazioni = d.annotations || [];
+  disegnaListaAppunti();
+  return annotazioni;
+}
+
+function disegnaListaAppunti() {
+  const box = $('lista-appunti');
+  if (!annotazioni.length) {
+    box.innerHTML = '<div class="vuoto">Nessuna evidenziazione.<br>' +
+                    'Seleziona del testo mentre leggi per iniziare.</div>';
+    return;
+  }
+  box.innerHTML = annotazioni.map(a => `
+    <div style="border-bottom:1px solid var(--linea);padding:11px 6px">
+      <div class="evid" style="border-left-color:${a.color};font-size:14px;line-height:1.5">
+        ${esc(a.text).slice(0, 320)}
+      </div>
+      ${a.note ? `<div style="font-size:13px;color:var(--tenue);margin-top:7px">📝 ${esc(a.note)}</div>` : ''}
+      <div style="margin-top:8px;display:flex;gap:8px">
+        <button class="scelta" data-vai="${a.id}">Vai</button>
+        <button class="scelta" data-nota="${a.id}">Nota</button>
+        <button class="scelta" data-elimina="${a.id}">Elimina</button>
+      </div>
+    </div>`).join('');
+}
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,
+  c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+$('lista-appunti').addEventListener('click', async (e) => {
+  const b = e.target.closest('button'); if (!b) return;
+  const a = annotazioni.find(x => x.id === (b.dataset.vai || b.dataset.nota || b.dataset.elimina));
+  if (!a) return;
+  if (b.dataset.vai) { chiudi(); vaiA(a.location); }
+  if (b.dataset.nota) { selezione = {annotazione: a}; $('nota-brano').textContent = a.text.slice(0,220);
+                        $('nota-testo').value = a.note || ''; apri('pan-nota'); }
+  if (b.dataset.elimina) {
+    await fetch('/api/annotations/' + a.id, {method: 'DELETE'});
+    if (motore === 'epub' && vista) vista.deleteAnnotation({value: a.location});
+    else ridisegnaSegniPdf();
+    await caricaAnnotazioni();
+  }
+});
+
+$('nota-salva').addEventListener('click', async () => {
+  const nota = $('nota-testo').value.trim();
+  if (selezione?.annotazione) {
+    await fetch('/api/annotations/' + selezione.annotazione.id, {
+      method: 'PATCH', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({note: nota})});
+  } else if (selezione) {
+    await creaAnnotazione(selezione, '#ffd640', nota);
+  }
+  selezione = null; chiudi(); await caricaAnnotazioni();
+});
+
+async function creaAnnotazione(sel, colore, nota) {
+  const d = await api('/api/book/' + JOB + '/annotations', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      location: sel.posizione, text: sel.testo, color: colore,
+      note: nota || '', chapter: sel.capitolo || '', percent: sel.percento || 0,
+    })});
+  await caricaAnnotazioni();
+  if (motore === 'epub' && vista && d.id) {
+    vista.addAnnotation({value: sel.posizione, color: colore});
+  } else {
+    ridisegnaSegniPdf();
+  }
+  return d.id;
+}
+
+// ---- fumetto di selezione ------------------------------------------------
+const fumetto = $('fumetto');
+function mostraFumetto(x, y) {
+  fumetto.classList.add('on');
+  const l = Math.max(8, Math.min(x - fumetto.offsetWidth / 2, innerWidth - fumetto.offsetWidth - 8));
+  const t = Math.max(56, y - fumetto.offsetHeight - 12);
+  fumetto.style.left = l + 'px'; fumetto.style.top = t + 'px';
+}
+function nascondiFumetto() { fumetto.classList.remove('on'); }
+
+fumetto.addEventListener('click', async (e) => {
+  const p = e.target.closest('.pastello');
+  if (p && selezione) { await creaAnnotazione(selezione, p.dataset.colore); nascondiFumetto(); selezione = null; return; }
+  if (e.target.id === 'fum-nota' && selezione) {
+    $('nota-brano').textContent = selezione.testo.slice(0, 220);
+    $('nota-testo').value = ''; nascondiFumetto(); apri('pan-nota'); return;
+  }
+  if (e.target.id === 'fum-copia' && selezione) {
+    navigator.clipboard?.writeText(selezione.testo); nascondiFumetto(); selezione = null;
+  }
+});
+
+// ---- comandi comuni ------------------------------------------------------
+$('btn-indice').onclick = () => apri('pan-indice');
+$('btn-appunti').onclick = () => { disegnaListaAppunti(); apri('pan-appunti'); };
+$('btn-aspetto').onclick = () => apri('pan-aspetto');
+document.querySelectorAll('#temi .scelta').forEach(b => b.onclick = () => {
+  PREF.tema = b.dataset.tema; salvaPref(); applicaTema(); applicaStileLibro();
+});
+$('testo-piu').onclick = () => { PREF.dim = Math.min(220, PREF.dim + 10); salvaPref(); applicaTema(); applicaStileLibro(); };
+$('testo-meno').onclick = () => { PREF.dim = Math.max(60, PREF.dim - 10); salvaPref(); applicaTema(); applicaStileLibro(); };
+document.querySelectorAll('#colonne .scelta').forEach(b => b.onclick = () => {
+  PREF.col = b.dataset.col; salvaPref(); applicaTema(); applicaStileLibro();
+});
+
+let vista = null;   // foliate-view
+let guastoSezione = null;   // dettagli dell'ultimo capitolo che non si e' caricato
+
+// Briciole di pane dell'avvio. Quando l'apertura non si conclude, sapere QUALE
+// passo non e' mai tornato vale piu' di qualunque ipotesi: senza queste si
+// finisce a provare a indovinare un passo alla volta.
+const TAPPE = [];
+let ultimaVita = Date.now();     // l'ultimo segno che il caricamento sta andando avanti
+function tappa(nome) { ultimaVita = Date.now(); TAPPE.push(Math.round(performance.now()) + 'ms ' + nome); }
+
+// =========================================================================
+// EPUB — foliate-js
+// =========================================================================
+const COLORI_TEMA = {
+  // `voce` e' lo sfondo della frase che si sta ascoltando. Va tarato per tema:
+  // lo stesso viola che sul chiaro e' un velo, sul notte sparisce.
+  chiaro: {sfondo: '#faf7f0', testo: '#1a1714', voce: 'rgba(124,58,237,.20)'},
+  sepia:  {sfondo: '#f4ecd8', testo: '#3a2f1e', voce: 'rgba(124,58,237,.22)'},
+  notte:  {sfondo: '#101014', testo: '#ddd8d0', voce: 'rgba(160,120,255,.34)'},
+};
+
+function applicaStileLibro() {
+  if (motore !== 'epub' || !vista?.renderer) return;
+  const t = COLORI_TEMA[PREF.tema];
+  vista.renderer.setStyles?.(`
+    html, body { color:${t.testo} !important; background:${t.sfondo} !important; }
+    body { font-size:${PREF.dim}% !important; line-height:1.55 !important;
+           font-family:Georgia,'Times New Roman',serif !important; }
+    p { text-align:justify; hyphens:auto; }
+    a { color:#7C3AED }
+    ::selection { background:rgba(124,58,237,.30) }
+    /* La frase in ascolto. Si disegna con l'API delle evidenziazioni CSS invece
+       che avvolgendo il testo in un tag: cosi' non si tocca il DOM del libro e
+       non si sballano i CFI delle annotazioni gia' salvate. */
+    ::highlight(voce) { background:${t.voce}; }
+  `);
+  vista.renderer.setAttribute('flow', PREF.col === 'scorrimento' ? 'scrolled' : 'paginated');
+
+  // Nessun altro attributo di gabbia: i valori predefiniti di foliate
+  // (--_gap 7%, --_margin 48px, --_max-inline-size 720px, 2 colonne) sono gia'
+  // quelli giusti. Attenzione se un giorno servisse cambiarli: quegli attributi
+  // finiscono TALI E QUALI dentro proprieta' CSS, quindi vanno scritti con
+  // l'unita' di misura ('7%', '48px'). Passandoli senza unita' la griglia
+  // collassa a larghezza zero e la pagina resta bianca pur navigando.
+}
+
+async function avviaEpub() {
+  motore = 'epub';
+  await import('/static/vendor/foliate/view.js');
+  const { Overlayer } = await import('/static/vendor/foliate/overlayer.js');
+
+  vista = document.createElement('foliate-view');
+  $('zona').append(vista);
+  tappa('epub: moduli importati');
+  await vista.open('/api/book/' + JOB + '/file');
+  tappa('epub: libro aperto, ' + (vista.book?.sections?.length ?? '?') + ' sezioni');
+
+  if (PREF.col === 'scorrimento' && vista.renderer) {
+    vista.renderer.setAttribute('flow', 'scrolled');
+  }
+
+  // Libri spezzettati.
+  //
+  // Molti EPUB scaricati dalla rete non sono un file per capitolo ma centinaia
+  // di file da poche righe (uno per pagina del PDF di partenza). Sfogliando,
+  // OGNI pezzo comincia a pagina nuova: si ottengono pagine con una riga sola e
+  // meta' schermo bianco. Misurato su un libro vero: 379 pezzi da ~2.000
+  // caratteri. In scorrimento il testo scorre di seguito e il problema sparisce.
+  //
+  // Si cambia solo se l'utente non ha mai scelto lui: una sua decisione non si
+  // tocca, e glielo si dice invece di farlo di nascosto.
+  const pezzi = vista.book?.sections?.length || 0;
+  if (!COLONNE_SCELTE_DA_LUI && pezzi >= 120) {
+    PREF.col = 'scorrimento';
+    vista.renderer?.setAttribute('flow', 'scrolled');
+    applicaTema();
+    avvisoSpezzettato(pezzi);
+  }
+  // Se un capitolo non si carica, foliate lo nasconde: scrive un console.warn
+  // e va avanti come se nulla fosse. La copia congelata ora lo racconta, e qui
+  // lo raccogliamo: e' cosi' che si e' scoperto che a rompere il lettore era
+  // un'estensione del browser che sostituisce il costruttore Blob.
+  vista.renderer?.addEventListener?.('sezione-non-caricata', e => {
+    const d = e.detail || {};
+    guastoSezione = d;
+    raccontaAlServer('capitolo non caricato (sezione ' + d.index + ')',
+                     (d.nome || '') + ' | ' + (d.messaggio || '') + ' | ' + (d.stack || ''));
+    // Se il colpevole e' un'estensione, dirlo: e' l'unica cosa che l'utente
+    // puo' davvero fare, e nessun messaggio generico gliela farebbe indovinare.
+    const est = /chrome-extension:\/\/([a-p]{32})/.exec(d.stack || '');
+    mostraGuasto(
+      est ? 'Un\'estensione del browser sta bloccando il libro.'
+          : 'Un capitolo del libro non si è caricato.',
+      est ? 'Prova in finestra di navigazione in incognito, oppure disattiva ' +
+            'le estensioni su questo sito. Identificativo: ' + est[1]
+          : (d.nome ? d.nome + ': ' : '') + (d.messaggio || ''));
+  }, { once: true });
+
+  vista.addEventListener('draw-annotation', e => {
+    const { draw, annotation } = e.detail;
+    draw(Overlayer.highlight, { color: annotation.color || '#ffd640' });
+  });
+  vista.addEventListener('show-annotation', e => {
+    const a = annotazioni.find(x => x.location === e.detail.value);
+    if (a) { selezione = {annotazione: a}; $('nota-brano').textContent = a.text.slice(0,220);
+             $('nota-testo').value = a.note || ''; apri('pan-nota'); }
+  });
+
+  vista.addEventListener('relocate', e => {
+    const d = e.detail;
+    segnaMostrato();                       // il libro e' visibile: guardiano a riposo
+    if (typeof d.index === 'number') indiceSezione = d.index;
+    const etichetta = d.tocItem?.label || (d.pageItem?.label ? 'p. ' + d.pageItem.label : '');
+    segnaAvanzamento(d.fraction, etichetta);
+    // Mentre la voce legge, la posizione buona e' quella della FRASE, salvata da
+    // evidenziaEInsegui. Girando pagina foliate emette qui il CFI di inizio
+    // pagina, che due secondi dopo sovrascriverebbe la frase: riaprendo il libro
+    // si tornerebbe a capo pagina invece che al punto ascoltato. E' esattamente
+    // la cosa da non rompere: la posizione e' una sola.
+    if (ripresaInCorso) return;
+    if (VOCE.suona) return;
+    if (d.cfi) salvaPosizione(d.cfi, d.fraction, etichetta);
+  });
+
+  // Selezione dentro l'iframe del libro.
+  vista.addEventListener('load', e => {
+    const doc = e.detail.doc;
+    doc.addEventListener('selectionchange', () => {
+      // Il fumetto resta disponibile anche mentre la voce legge: serve per
+      // "ascolta da qui". Non c'e' piu' il rischio che si apra da solo, perche'
+      // la frase in ascolto viene evidenziata con l'API delle evidenziazioni
+      // CSS e non creando una selezione.
+      const s = doc.getSelection();
+      if (!s || s.isCollapsed || !s.toString().trim()) { nascondiFumetto(); return; }
+      const r = s.getRangeAt(0);
+      const box = r.getBoundingClientRect();
+      const iframe = vista.renderer?.querySelector?.('iframe');
+      const off = iframe ? iframe.getBoundingClientRect() : {left: 0, top: 0};
+      selezione = {
+        testo: s.toString().trim(),
+        posizione: vista.getCFI(e.detail.index, r),
+        capitolo: $('posizione').textContent,
+        percento: posCorrente.percent,
+      };
+      mostraFumetto(off.left + box.left + box.width / 2, off.top + box.top);
+    });
+    doc.addEventListener('click', () => {
+      document.body.classList.toggle('immersivo');
+    });
+  });
+
+  applicaStileLibro();
+
+  // Indice
+  const toc = vista.book?.toc || [];
+  $('lista-indice').innerHTML = toc.length
+    ? toc.map((t, i) => `<button class="voce" data-href="${esc(t.href)}">${esc(t.label)}</button>`).join('')
+    : '<div class="vuoto">Questo libro non ha un indice.</div>';
+  $('lista-indice').onclick = (ev) => {
+    const b = ev.target.closest('[data-href]'); if (!b) return;
+    chiudi(); vista.goTo(b.dataset.href);
+  };
+
+  // Riprende da dove eri rimasto.
+  //
+  // `init()` non e' opzionale: e' il passo che disegna davvero la prima
+  // schermata. Senza, il libro si carica (sezioni e indice compresi) ma la
+  // pagina resta bianca.
+  const p = await api('/api/book/' + JOB + '/progress');
+  try {
+    await vista.init({ lastLocation: p.location || null,
+                       showTextStart: !p.location });
+  } catch (e) {
+    console.warn('Segnalibro non valido, riparto dall\'inizio', e);
+    await vista.init({ showTextStart: true });
+  }
+
+  const anns = await caricaAnnotazioni();
+  for (const a of anns) {
+    try { await vista.addAnnotation({value: a.location, color: a.color}); } catch (e) {}
+  }
+
+  $('btn-prec').onclick = () => vista.prev();
+  $('btn-succ').onclick = () => vista.next();
+  addEventListener('keydown', ev => {
+    if (ev.key === 'ArrowLeft') vista.prev();
+    if (ev.key === 'ArrowRight' || ev.key === ' ') { ev.preventDefault(); vista.next(); }
+  });
+}
+
+// =========================================================================
+// PDF — pdf.js
+// =========================================================================
+let pdfDoc = null, paginaCorrente = 1, renderizzate = new Set();
+
+async function avviaPdf() {
+  motore = 'pdf';
+  tappa('pdf: inizio');
+  // pdf.js 6 usa gli "iterator helpers" (Iterator.prototype...), che Safari ha
+  // solo da iOS/iPadOS 18.4: su un iPad meno aggiornato moriva all'istante con
+  // "Can't find variable: Iterator". La build "legacy" porta i polyfill: la si
+  // usa quando manca qualcosa (o con ?pdfjs=legacy per provarla).
+  const serveLegacy = typeof Iterator === 'undefined' || typeof Promise.withResolvers !== 'function'
+    || new URLSearchParams(location.search).get('pdfjs') === 'legacy';
+  const basePdfjs = serveLegacy ? '/static/vendor/pdfjs/legacy/build/' : '/static/vendor/pdfjs/build/';
+  const pdfjs = await import(basePdfjs + 'pdf.mjs');
+  tappa('pdf: modulo importato' + (serveLegacy ? ' (legacy)' : ''));
+  pdfjs.GlobalWorkerOptions.workerSrc = basePdfjs + 'pdf.worker.mjs';
+
+  const cont = document.createElement('div');
+  cont.id = 'pdf'; $('zona').append(cont);
+
+  const caricamento = pdfjs.getDocument({
+    url: '/api/book/' + JOB + '/file',
+    cMapUrl: '/static/vendor/pdfjs/cmaps/', cMapPacked: true,
+    standardFontDataUrl: '/static/vendor/pdfjs/standard_fonts/',
+    // I libri scansionati contengono immagini JPEG 2000 (e a volte JBIG2), che
+    // pdf.js decodifica con moduli WebAssembly separati. Senza questo percorso
+    // fallisce con "OpenJPEG failed to initialize": la pagina scansionata non
+    // viene disegnata e restano visibili solo i riquadri color carta, come
+    // bande grigie sotto il testo.
+    wasmUrl: '/static/vendor/pdfjs/wasm/',
+    iccUrl: '/static/vendor/pdfjs/iccs/',
+    // Solo i pezzi che servono alle pagine che guardi, via Range: un libro
+    // scansionato da 120 MB si apriva dopo aver scaricato TUTTO. Attenzione:
+    // all'apertura pdf.js legge i dizionari di TUTTE le pagine (checkLastPage);
+    // i PDF della libreria vengono riscritti (pdf_lineare.py) con quei
+    // dizionari tutti in testa al file, cosi' bastano 2-3 richieste. Un PDF
+    // "linearizzato" classico e' PEGGIO: ogni dizionario sta accanto alla sua
+    // immagine e pdf.js fa 190 richieste. Senza disableStream il download
+    // intero ripartirebbe lo stesso (documentazione di pdf.js). Il chunk da
+    // 256 KB deve combaciare con CHUNK_LETTORE in pdf_lineare.py.
+    disableAutoFetch: true,
+    disableStream: true,
+    rangeChunkSize: 262144,       // una pagina scansionata e' ~500 KB: 2-3 richieste
+  });
+  // Un libro scansionato pesa anche 120 MB: finche' arrivano byte il lettore
+  // NON e' guasto, sta scaricando. Lo dice, e tiene buono il guardiano.
+  caricamento.onProgress = p => {
+    ultimaVita = Date.now();
+    if (qualcosaMostrato) return;      // si legge gia': il contapagine vale di piu'
+    const mb = Math.round((p.loaded || 0) / 1048576);
+    segnaAvanzamento(0, p.total ? 'Scarico il libro… ' + mb + ' MB di ' + Math.round(p.total / 1048576)
+                               : 'Scarico il libro… ' + mb + ' MB');
+  };
+  pdfDoc = await caricamento.promise;
+  tappa('pdf: documento aperto, ' + pdfDoc.numPages + ' pagine');
+
+  // Struttura vuota: si riempie solo cio' che entra nello schermo, altrimenti
+  // un libro di 216 pagine bloccherebbe il telefono.
+  // La forma della prima pagina si legge UNA volta sola: chiederla per tutte
+  // e 216 significava 216 attese prima ancora di mostrare qualcosa.
+  const primaPagina = await pdfDoc.getPage(1);
+  tappa('pdf: prima pagina letta');
+  const proporzione = primaPagina.getViewport({scale: 1});
+  const larghezza = Math.min(cont.clientWidth - 24, 900);
+  const altezza = larghezza * proporzione.height / proporzione.width;
+
+  const frammento = document.createDocumentFragment();
+  for (let n = 1; n <= pdfDoc.numPages; n++) {
+    const d = document.createElement('div');
+    d.className = 'pagina'; d.dataset.n = n;
+    d.style.width = larghezza + 'px';
+    d.style.height = altezza + 'px';
+    frammento.append(d);
+  }
+  cont.append(frammento);
+  tappa('pdf: struttura creata, larghezza contenitore ' + cont.clientWidth);
+  $('btn-traduci').hidden = false;
+  caricaTradotte();
+
+  // Si disegna in base allo scorrimento invece che con un IntersectionObserver:
+  // dopo un salto di pagina l'osservatore smetteva di segnalare e il libro
+  // restava bianco. Questo percorso e' deterministico e verificabile.
+  const divPagine = [...cont.querySelectorAll('.pagina')];
+
+  function aggiorna() {
+    const cima = cont.scrollTop, fondo = cima + cont.clientHeight;
+    let visibile = paginaCorrente;
+    for (const d of divPagine) {
+      const y0 = d.offsetTop, y1 = y0 + d.offsetHeight;
+      // Margine di due schermate: le pagine sono pronte prima di arrivarci.
+      if (y1 > cima - cont.clientHeight * 2 && y0 < fondo + cont.clientHeight * 2) {
+        const n = +d.dataset.n;
+        if (!renderizzate.has(n)) { renderizzate.add(n); rendiPagina(n, d, pdfjs); }
+      }
+      if (y0 <= cima + cont.clientHeight * 0.35 && y1 > cima + cont.clientHeight * 0.35)
+        visibile = +d.dataset.n;
+    }
+    if (visibile !== paginaCorrente) {
+      paginaCorrente = visibile;
+      aggiornaBottoneTraduci();
+      const frazione = visibile / pdfDoc.numPages;
+      segnaAvanzamento(frazione, 'Pagina ' + visibile + ' di ' + pdfDoc.numPages);
+      salvaPosizione('p' + visibile, frazione, 'Pagina ' + visibile);
+    }
+  }
+
+  // Throttle con setTimeout e non con requestAnimationFrame: in una scheda in
+  // secondo piano rAF non viene mai eseguito, il "gia' in coda" resterebbe
+  // alzato per sempre e il libro smetterebbe di disegnarsi.
+  let inCoda = false;
+  const chiediAggiornamento = () => {
+    if (inCoda) return;
+    inCoda = true;
+    setTimeout(() => { inCoda = false; aggiorna(); }, 90);
+  };
+  cont.addEventListener('scroll', chiediAggiornamento, {passive: true});
+  addEventListener('resize', () => { renderizzate.clear(); aggiorna(); });
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) aggiorna();       // tornando sulla scheda, recupera
+  });
+  // Rete di sicurezza: se per qualsiasi motivo un evento si perde, entro un
+  // secondo la pagina giusta viene comunque disegnata.
+  setInterval(aggiorna, 1000);
+  aggiorna();
+  tappa('pdf: primo disegno richiesto');
+
+  $('lista-indice').innerHTML =
+    '<div class="riga-opz"><label>Vai a pagina</label>' +
+    '<input id="vai-pag" type="number" min="1" max="' + pdfDoc.numPages + '" ' +
+    'style="flex:1;padding:10px;border-radius:10px;border:1px solid var(--linea);' +
+    'background:transparent;color:inherit;font:inherit"></div>';
+  $('vai-pag').addEventListener('change', e => {
+    const n = Math.max(1, Math.min(pdfDoc.numPages, +e.target.value || 1));
+    chiudi(); cont.querySelector('.pagina[data-n="' + n + '"]')?.scrollIntoView();
+  });
+
+  const p = await api('/api/book/' + JOB + '/progress');
+  tappa('pdf: posizione recuperata');
+  await caricaAnnotazioni();
+  tappa('pdf: annotazioni caricate');
+  if (p.location && p.location.startsWith('p')) {
+    const n = +p.location.slice(1);
+    setTimeout(() => cont.querySelector('.pagina[data-n="' + n + '"]')?.scrollIntoView(), 120);
+  }
+
+  $('btn-prec').onclick = () => cont.querySelector('.pagina[data-n="' + Math.max(1, paginaCorrente - 1) + '"]')?.scrollIntoView();
+  $('btn-succ').onclick = () => cont.querySelector('.pagina[data-n="' + Math.min(pdfDoc.numPages, paginaCorrente + 1) + '"]')?.scrollIntoView();
+
+  cont.addEventListener('mouseup', gestisciSelezionePdf);
+  cont.addEventListener('touchend', () => setTimeout(gestisciSelezionePdf, 60));
+  $('riga-colonne').style.display = 'none';
+  tappa('pdf: avvio concluso');
+}
+
+// I PDF scansionati portano sotto l'immagine uno strato di testo invisibile
+// prodotto dall'OCR: e' quello che rende il libro cercabile. Nei libri tradotti
+// da una versione vecchia del traduttore quello strato e' rimasto IN INGLESE
+// sotto la traduzione italiana. Non si vede, ma e' cio' che legge la ricerca,
+// il copia-incolla e — soprattutto — la voce dell'audiolibro: su quelle pagine
+// leggeva in inglese.
+//
+// Si riconosce dal font: l'OCR usa un font senza glifi che pdf.js riporta come
+// "monospace", mentre il testo inserito dal traduttore no. Misurato su una
+// pagina vera: 425 elementi monospace (tutti inglesi) contro 108 del testo
+// italiano.
+//
+// Cautela: in un PDF normale il monospace puo' essere testo vero (codice). Si
+// scarta solo se dopo resta comunque una buona parte del testo della pagina.
+function senzaStratoOcr(contenuto) {
+  try {
+    const stili = contenuto.styles || {};
+    const eOcr = i => (stili[i.fontName] || {}).fontFamily === 'monospace';
+    const tenuti = contenuto.items.filter(i => !eOcr(i));
+    const caratteriTotali = contenuto.items.reduce((n, i) => n + (i.str || '').length, 0);
+    const caratteriTenuti = tenuti.reduce((n, i) => n + (i.str || '').length, 0);
+    if (!caratteriTotali || caratteriTenuti < caratteriTotali * 0.2) return contenuto;
+    return Object.assign({}, contenuto, {items: tenuti});
+  } catch (e) { return contenuto; }
+}
+
+// ---- traduci pagina (PDF scansionati) --------------------------------------
+//
+// Il testo di un libro scansionato sta dentro la fotografia della pagina: non
+// si puo' tradurre "il file". Si traduce la pagina che stai guardando, quando
+// la chiedi: il server riconosce le righe, le traduce e le riscrive sullo
+// stesso sfondo, illustrazioni comprese. Il risultato e' un'immagine che si
+// posa sopra la pagina; la seconda volta e' gia' pronta e non costa nulla.
+const TRADOTTE = new Set();
+
+function avvisoPagina(testo, durata) {
+  let d = $('avviso-pagina');
+  if (!d) { d = document.createElement('div'); d.id = 'avviso-pagina'; document.body.append(d); }
+  d.textContent = testo;
+  clearTimeout(d._t);
+  d._t = setTimeout(() => d.remove(), durata || 6000);
+}
+
+function applicaTradotta(n, box) {
+  if (!TRADOTTE.has(n) || !box || box.querySelector('img.tradotta')) return;
+  const img = document.createElement('img');
+  img.className = 'tradotta'; img.alt = 'Pagina ' + n + ' in italiano';
+  img.loading = 'lazy'; img.decoding = 'async';   // solo quando la pagina si avvicina allo schermo
+  img.src = '/api/pagina/' + JOB + '/' + n + '.jpg';
+  // se il server non ce l'ha davvero, niente icona di immagine rotta sulla pagina
+  img.onerror = () => { img.remove(); TRADOTTE.delete(n); aggiornaBottoneTraduci(); };
+  box.append(img);
+}
+
+function aggiornaBottoneTraduci() {
+  const b = $('btn-traduci'); if (!b || b.hidden) return;
+  const fatta = TRADOTTE.has(paginaCorrente);
+  b.classList.toggle('fatta', fatta);
+  b.title = fatta ? 'Pagina ' + paginaCorrente + ' già in italiano: tocca per confrontarla con l\'originale'
+                  : 'Traduci la pagina ' + paginaCorrente + ' in italiano';
+}
+
+async function caricaTradotte() {
+  try {
+    const r = await fetch('/api/pagina/' + JOB + '/tradotte');
+    if (r.ok) {
+      const d = await r.json();
+      (d.pronte || []).forEach(n => TRADOTTE.add(n));
+      CODA.in_coda = d.in_coda || []; CODA.in_corso = d.in_corso || null;
+      if (CODA.in_coda.length || CODA.in_corso) sorvegliaCoda();   // c'era una coda: si riprende a seguirla
+    }
+  } catch (e) { /* senza rete si traduce lo stesso al prossimo tocco */ }
+  document.querySelectorAll('#pdf .pagina').forEach(b => applicaTradotta(+b.dataset.n, b));
+  aggiornaBottoneTraduci();
+}
+
+let CODA = {in_coda: [], in_corso: null, sorveglio: false};
+
+async function traduciPaginaCorrente() {
+  const n = paginaCorrente, b = $('btn-traduci');
+  const box = document.querySelector('#pdf .pagina[data-n="' + n + '"]');
+  if (TRADOTTE.has(n)) { alternaOriginale(n); return; }
+  b.classList.add('lavora'); b.textContent = '…';
+  const t0 = Date.now();
+  avvisoPagina('Traduco la pagina ' + n + '…', 120000);
+  try {
+    const r = await fetch('/api/pagina/' + JOB + '/' + n + '/traduci', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}',
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || ('errore ' + r.status));
+    TRADOTTE.add(n);
+    applicaTradotta(n, box);
+    avvisoPagina('Pagina ' + n + ' in italiano in ' + Math.round((Date.now() - t0) / 1000) + ' s.', 4000);
+    sorvegliaCoda();                     // il server prepara gia' le prossime: si segue
+  } catch (e) {
+    avvisoPagina('Non ci sono riuscito: ' + e.message, 8000);
+  } finally {
+    b.classList.remove('lavora'); b.textContent = '🇮🇹';
+    aggiornaBottoneTraduci();
+  }
+}
+
+function alternaOriginale(n) {
+  const box = document.querySelector('#pdf .pagina[data-n="' + n + '"]');
+  if (!box) return;
+  box.classList.toggle('mostra-originale');
+  avvisoPagina(box.classList.contains('mostra-originale') ? 'Pagina ' + n + ': originale' : 'Pagina ' + n + ': italiano', 1500);
+}
+
+// "Traduci le prossime N": il server le fa in ordine mentre leggi; qui si
+// controlla ogni pochi secondi cosa e' pronto e lo si mette sulla pagina.
+async function traduciProssime(quante) {
+  const da = paginaCorrente;
+  try {
+    const r = await fetch('/api/pagina/' + JOB + '/coda', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({da, quante}),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || ('errore ' + r.status));
+    aggiornaCoda(d);
+    avvisoPagina((d.aggiunte || []).length
+      ? 'Traduco le pagine da ' + da + ' a ' + (da + quante - 1) + ' in sottofondo: compaiono man mano.'
+      : 'Queste pagine sono già pronte o in coda.', 5000);
+    sorvegliaCoda();
+  } catch (e) {
+    avvisoPagina('Non ci sono riuscito: ' + e.message, 8000);
+  }
+}
+
+async function fermaCoda() {
+  try {
+    const r = await fetch('/api/pagina/' + JOB + '/coda', {method: 'DELETE'});
+    if (r.ok) aggiornaCoda(await r.json());
+    avvisoPagina('Coda fermata: quella in corso finisce, le altre no.', 4000);
+  } catch (e) {}
+}
+
+function aggiornaCoda(d) {
+  (d.pronte || []).forEach(n => TRADOTTE.add(n));
+  CODA.in_coda = d.in_coda || []; CODA.in_corso = d.in_corso || null;
+  document.querySelectorAll('#pdf .pagina').forEach(b => applicaTradotta(+b.dataset.n, b));
+  aggiornaBottoneTraduci();
+}
+
+async function sorvegliaCoda() {
+  if (CODA.sorveglio) return;
+  CODA.sorveglio = true;
+  try {
+    let fermi = 0;                       // giri di fila senza risposta utile
+    for (let primo = true; fermi < 30; primo = false) {
+      await new Promise(r => setTimeout(r, primo ? 1500 : 4000));
+      if (document.hidden) continue;        // in tasca non si spreca rete, e non si conta
+      let d;
+      try { const r = await fetch('/api/pagina/' + JOB + '/tradotte'); if (!r.ok) { fermi++; continue; } d = await r.json(); }
+      catch (e) { fermi++; continue; }
+      fermi = 0;
+      aggiornaCoda(d);
+      if (!CODA.in_coda.length && CODA.in_corso === null) break;   // il server ha finito
+      const dopo = CODA.in_coda.length;
+      avvisoPagina('Traduco in sottofondo' + (CODA.in_corso ? ': pagina ' + CODA.in_corso : '') +
+                   (dopo ? ' · ' + dopo + ' in attesa' : ''), 4500);
+    }
+  } finally { CODA.sorveglio = false; }
+}
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && (CODA.in_coda.length || CODA.in_corso)) sorvegliaCoda();
+});
+
+// Il pulsante apre un piccolo menu: questa pagina, le prossime 10, originale.
+function apriMenuTraduci() {
+  let m = $('menu-traduci');
+  if (m) { (m._chiudi || (() => m.remove()))(); return; }
+  m = document.createElement('div'); m.id = 'menu-traduci';
+  const n = paginaCorrente, fatta = TRADOTTE.has(n);
+  const voce = (testo, azione, disabilitato) => {
+    const b = document.createElement('button'); b.textContent = testo; b.disabled = !!disabilitato;
+    b.onclick = () => { m._chiudi(); azione(); }; m.append(b); return b;
+  };
+  voce(fatta ? 'Pagina ' + n + ': già in italiano' : 'Traduci questa pagina (' + n + ')',
+       traduciPaginaCorrente, fatta);
+  voce('Traduci le prossime 10 pagine', () => traduciProssime(10));
+  if (fatta) {
+    const box = document.querySelector('#pdf .pagina[data-n="' + n + '"]');
+    const orig = box && box.classList.contains('mostra-originale');
+    voce(orig ? 'Mostra l’italiano' : 'Mostra l’originale', () => alternaOriginale(n));
+  }
+  if (CODA.in_coda.length || CODA.in_corso) {
+    voce('Ferma la coda (' + CODA.in_coda.length + ' in attesa)', fermaCoda);
+  }
+  const nota = document.createElement('div'); nota.className = 'nota';
+  nota.textContent = TRADOTTE.size + ' pagine già in italiano' +
+    (CODA.in_corso ? ' · sto traducendo la ' + CODA.in_corso : '');
+  m.append(nota);
+  document.body.append(m);
+  const fuori = ev => {
+    if (!m.contains(ev.target) && ev.target !== $('btn-traduci')) chiudi();
+  };
+  const chiudi = () => { m.remove(); document.removeEventListener('pointerdown', fuori); };
+  m._chiudi = chiudi;
+  setTimeout(() => document.addEventListener('pointerdown', fuori), 0);
+  if (CODA.in_coda.length || CODA.in_corso) sorvegliaCoda();   // c'e' lavoro: si torna a seguirlo
+}
+$('btn-traduci').onclick = apriMenuTraduci;
+
+async function rendiPagina(n, box, pdfjs) {
+  try {
+    await disegna(n, box, pdfjs);
+    applicaTradotta(n, box);
+  } catch (e) {
+    // Una pagina che non si disegna non deve bloccare le altre, ma nemmeno
+    // sparire in silenzio: si segna e si potra' riprovare scorrendo.
+    console.error('Pagina %d non disegnata:', n, e);
+    renderizzate.delete(n);
+    box.innerHTML = '<div style="padding:20px;color:#a00;font-size:13px">' +
+                    'Pagina ' + n + ' non disegnata</div>';
+  }
+}
+
+async function disegna(n, box, pdfjs) {
+  const pagina = await pdfDoc.getPage(n);
+  const larghezza = box.clientWidth || box.offsetWidth;
+  const base = pagina.getViewport({scale: 1});
+  // Il rapporto pixel dello schermo si limita a 2: oltre, 216 pagine di
+  // canvas saturano la memoria del telefono senza guadagno visibile.
+  const nitidezza = Math.min(window.devicePixelRatio || 1, 2);
+  const vp = pagina.getViewport({scale: (larghezza / base.width) * nitidezza});
+
+  const canvas = document.createElement('canvas');
+  canvas.width = vp.width; canvas.height = vp.height;
+  box.style.height = (larghezza * base.height / base.width) + 'px';
+  box.innerHTML = ''; box.append(canvas);
+  await pagina.render({canvasContext: canvas.getContext('2d'), viewport: vp}).promise;
+  segnaMostrato();                          // una pagina disegnata: tutto bene
+
+  // Strato di testo: senza, sul PDF non si potrebbe selezionare nulla.
+  const strato = document.createElement('div');
+  strato.className = 'strato-testo';
+  box.append(strato);
+  try {
+    const tl = new pdfjs.TextLayer({
+      textContentSource: senzaStratoOcr(await pagina.getTextContent()),
+      container: strato,
+      viewport: pagina.getViewport({scale: larghezza / base.width}),
+    });
+    await tl.render();
+  } catch (e) { /* il testo non e' selezionabile, la lettura resta possibile */ }
+  disegnaSegniPagina(n, box);
+}
+
+function gestisciSelezionePdf() {
+  const s = document.getSelection();
+  if (!s || s.isCollapsed || !s.toString().trim()) { nascondiFumetto(); return; }
+  const r = s.getRangeAt(0), box = r.getBoundingClientRect();
+  const pag = r.startContainer.parentElement?.closest?.('.pagina');
+  selezione = {
+    testo: s.toString().trim().replace(/\s+/g, ' '),
+    posizione: 'p' + (pag ? pag.dataset.n : paginaCorrente),
+    capitolo: 'Pagina ' + (pag ? pag.dataset.n : paginaCorrente),
+    percento: paginaCorrente / (pdfDoc?.numPages || 1),
+  };
+  mostraFumetto(box.left + box.width / 2, box.top);
+}
+
+// Sui PDF l'evidenziazione si ritrova cercando il testo nello strato:
+// più robusto di salvare coordinate, che cambiano col ridimensionamento.
+function disegnaSegniPagina(n, box) {
+  const strato = box.querySelector('.strato-testo'); if (!strato) return;
+  box.querySelectorAll('.segno').forEach(x => x.remove());
+  const mie = annotazioni.filter(a => a.location === 'p' + n);
+  if (!mie.length) return;
+  const spans = [...strato.querySelectorAll('span')];
+  const riquadro = box.getBoundingClientRect();
+  for (const a of mie) {
+    const ago = a.text.slice(0, 28).toLowerCase();
+    for (const sp of spans) {
+      if (!sp.textContent.toLowerCase().includes(ago.slice(0, 14))) continue;
+      const r = sp.getBoundingClientRect();
+      const d = document.createElement('div');
+      d.className = 'segno';
+      d.style.cssText = `left:${r.left - riquadro.left}px;top:${r.top - riquadro.top}px;` +
+                        `width:${r.width}px;height:${r.height}px;background:${a.color}66`;
+      box.append(d);
+      break;
+    }
+  }
+}
+function ridisegnaSegniPdf() {
+  document.querySelectorAll('#pdf .pagina').forEach(b => {
+    if (b.querySelector('canvas')) disegnaSegniPagina(+b.dataset.n, b);
+  });
+}
+
+// =========================================================================
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('#fumetto') && !document.getSelection()?.toString().trim())
+    nascondiFumetto();
+});
+
+// Una pagina bianca senza spiegazione e' il peggior esito possibile: se dopo
+// alcuni secondi non e' comparso nulla, si dice cosa e' successo e si offre
+// una via d'uscita, invece di lasciare l'utente davanti al vuoto.
+// =========================================================================
+// ASCOLTO — il libro letto ad alta voce
+// =========================================================================
+//
+// Come sta in piedi.
+//
+// foliate sa gia' camminare nel testo: per ogni paragrafo produce un SSML con
+// un <mark> davanti a ogni frase, e `setMark(nome)` evidenzia esattamente la
+// frase di quel mark. Noi non usiamo l'SSML per parlare — ce ne serviamo solo
+// per sapere DOVE comincia e dove finisce ogni frase. L'audio lo chiediamo al
+// server una frase per volta, e quando la frase parte diciamo a foliate di
+// evidenziarla. Nessun tempo, nessun allineamento, nessuna sincronia da
+// indovinare: la frase evidenziata E' la frase che sta suonando.
+//
+// Vincolo scoperto leggendo tts.js: la mappa dei mark viene RISCRITTA ogni
+// volta che si chiede il paragrafo successivo. Quindi si puo' precaricare
+// l'audio delle frasi del paragrafo corrente, ma non si puo' correre avanti
+// coi paragrafi: si passa al successivo solo quando il corrente e' finito.
+// La pausa che ne nasce cade fra un paragrafo e l'altro, dove ci starebbe
+// comunque.
+//
+// La posizione e' UNA SOLA, quella della lettura: la frase in riproduzione
+// diventa un CFI e viene salvata con la stessa funzione che usa il lettore.
+// Chi ascolta in macchina e poi apre il libro sul divano riprende da li'.
+
+const VOCE = {
+  acceso: false,        // il pannello d'ascolto e' aperto
+  suona: false,         // sta effettivamente parlando
+  voce: null,
+  velocita: 1,
+  frasi: [],            // {mark, testo} del paragrafo corrente
+  i: 0,
+  prossimo: null,       // il blocco successivo, gia' letto e gia' scaricato
+  sbirciando: false,    // una lettura in anticipo alla volta, non dieci
+  audio: [],            // due elementi che si alternano: meno silenzio fra le frasi
+  turno: 0,
+  cache: new Map(),     // testo -> Promise<url del blob>
+  generazione: 0,       // cambia a ogni stop: le richieste vecchie si autoannullano
+  interrompi: null,     // chiude dall'esterno l'attesa della frase in corso
+  finito: false,
+};
+
+let indiceSezione = 0;  // sezione EPUB corrente, per costruire il CFI
+
+function elementiAudio() {
+  if (VOCE.audio.length) return VOCE.audio;
+  for (let n = 0; n < 2; n++) {
+    const a = new Audio();
+    a.preload = 'auto';
+    // Su iPhone l'audio deve nascere da un gesto dell'utente e quegli stessi
+    // elementi vanno riusati per sempre: crearne uno nuovo a ogni frase fa
+    // perdere il permesso e la riproduzione muore appena si blocca lo schermo.
+    a.playsInline = true;
+    VOCE.audio.push(a);
+  }
+  return VOCE.audio;
+}
+
+// ---- deposito offline ------------------------------------------------------
+// L'audio di ogni frase, una volta prodotto, finisce nel deposito del browser
+// (Cache Storage). Da quel momento quella frase suona anche col Mac spento e
+// senza rete: il telefono ce l'ha gia'. E' cio' che rende l'ascolto
+// indipendente dal Mac senza cambiare NULLA di come si ascolta: velocita',
+// testo che avanza ed evidenziazione restano quelli di sempre.
+const DEPOSITO = 'voce-offline-v1';
+
+async function chiaveLocale(testo, voce) {
+  const dati = new TextEncoder().encode((voce || '') + '\u0000' + testo);
+  const somma = await crypto.subtle.digest('SHA-256', dati);
+  return '/offline-voce/' + [...new Uint8Array(somma)]
+    .map(b => b.toString(16).padStart(2, '0')).join('') + '.mp3';
+}
+
+async function dalDeposito(testo, voce) {
+  try {
+    const c = await caches.open(DEPOSITO);
+    const r = await c.match(await chiaveLocale(testo, voce));
+    return r ? URL.createObjectURL(await r.blob()) : null;
+  } catch (e) { return null; }
+}
+
+// Quante frasi tenere sul telefono. Non e' un magazzino: e' una scorta di
+// qualche minuto, che serve a non far sentire i buchi se la rete tossisce e a
+// non rifar pagare al Mac una frase appena sentita. 300 frasi sono circa 10 MB:
+// lo spazio del telefono non se ne accorge.
+const DEPOSITO_MAX = 300;
+
+async function nelDeposito(testo, voce, risposta) {
+  try {
+    const c = await caches.open(DEPOSITO);
+    await c.put(await chiaveLocale(testo, voce), risposta);
+    // Si buttano le piu' vecchie: Cache Storage conserva l'ordine d'inserimento.
+    const chiavi = await c.keys();
+    if (chiavi.length > DEPOSITO_MAX) {
+      for (const k of chiavi.slice(0, chiavi.length - DEPOSITO_MAX)) await c.delete(k);
+    }
+  } catch (e) { /* deposito pieno o non disponibile: si tira dritto */ }
+}
+
+async function quantoNelDeposito() {
+  try {
+    const c = await caches.open(DEPOSITO);
+    return (await c.keys()).length;
+  } catch (e) { return 0; }
+}
+
+async function urlDellaFrase(testo) {
+  if (VOCE.cache.has(testo)) return VOCE.cache.get(testo);
+  const p = (async () => {
+    // Prima il deposito: se la frase e' gia' sul telefono non servono ne' la
+    // rete ne' il Mac acceso.
+    const locale = await dalDeposito(testo, VOCE.voce);
+    if (locale) return locale;
+
+    // Senza scadenza, una richiesta che non torna mai (tunnel che chiude senza
+    // avvisare, passaggio wifi->rete mobile) lascia l'attesa appesa. E siccome
+    // la Promise finisce in cache PRIMA di risolversi, quella frase resterebbe
+    // avvelenata per tutta la sessione: "Preparo la voce..." per sempre.
+    // Su rete mobile una richiesta che non torna entro 15 secondi non tornera'
+    // piu': meglio tagliarla e riprovare che restare fermi un minuto buono.
+    const taglio = new AbortController();
+    const scadenza = setTimeout(() => taglio.abort(), 15000);
+    let r;
+    try {
+      r = await fetch('/api/voce', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({testo, voce: VOCE.voce}),
+        signal: taglio.signal,
+      });
+    } finally { clearTimeout(scadenza); }
+    if (!r.ok) {
+      let messaggio = 'Voce non disponibile';
+      try { messaggio = (await r.json()).error || messaggio; } catch (e) {}
+      const err = new Error(messaggio); err.stato = r.status; throw err;
+    }
+    // Una copia va nel deposito del telefono, una si usa adesso.
+    nelDeposito(testo, VOCE.voce, r.clone());
+    return URL.createObjectURL(await r.blob());
+  })();
+  VOCE.cache.set(testo, p);
+  // Una richiesta fallita non deve restare in cache: al prossimo tentativo
+  // ripescherebbe per sempre lo stesso errore.
+  p.catch(() => VOCE.cache.delete(testo));
+  // ...e non deve nemmeno restarci se non risponde affatto: senza questo, la
+  // frase appesa non verrebbe mai piu' richiesta.
+  setTimeout(() => { if (VOCE.cache.get(testo) === p) VOCE.cache.delete(testo); }, 50000);
+  // La cache tiene solo le ultime frasi: gli URL dei blob occupano memoria
+  // vera e un libro intero la esaurirebbe.
+  if (VOCE.cache.size > 24) {
+    const primo = VOCE.cache.keys().next().value;
+    VOCE.cache.get(primo)?.then(u => URL.revokeObjectURL(u)).catch(() => {});
+    VOCE.cache.delete(primo);
+  }
+  return p;
+}
+
+// Sul server una frase richiede ~27 secondi di calcolo e ne dura 7: chi ascolta
+// non puo' aspettare che venga generata al momento. Quindi due cose diverse:
+//
+//   1. le prossime DUE si scaricano davvero, per avere l'audio in mano subito;
+//   2. tutte le altre si ANNUNCIANO al server, che le mette in coda e le prepara
+//      in sottofondo. E' una richiesta sola, torna subito, non tiene aperto
+//      niente. Quando ci arriverai saranno gia' in cache: 0,02 secondi.
+//
+// Scaricarle tutte come blob (com'era prima) terrebbe aperte decine di
+// connessioni per minuti su una macchina con due CPU, e rallenterebbe proprio
+// la frase che stai aspettando.
+let annuncioInCorso = false;
+
+// Quando smetti di ascoltare, la coda a pagamento va svuotata: il
+// precaricamento serve a non farti aspettare, non a comprarti il libro intero
+// perche' hai aperto una pagina per due minuti.
+async function mostraSpesa() {
+  try {
+    const r = await fetch('/api/spesa');
+    if (!r.ok) return;
+    const d = await r.json();
+    const box = document.getElementById('spesa-voce');
+    if (!box) return;
+    if (!d.attivo) { box.hidden = true; return; }
+    // le ore residue dicono molto piu' dei dollari: e' la domanda vera
+    box.textContent = `${d.ore_residue} ore residue · ${d.speso.toFixed(3)}$ di ${d.tetto}$`;
+    box.className = d.allarme || '';
+    box.hidden = false;
+  } catch (e) { /* il contatore non deve mai impedire di ascoltare */ }
+}
+
+function fermaPreparazione() {
+  fetch('/api/voce/ferma', {method: 'POST'}).catch(() => {});
+}
+
+async function annunciaProssime(da, quante) {
+  if (annuncioInCorso) return;
+  const testi = [];
+  for (let k = da; k < da + quante; k++) {
+    const f = VOCE.frasi[k];
+    if (f && f.testo) testi.push(f.testo);
+  }
+  if (!testi.length) return;
+  annuncioInCorso = true;
+  try {
+    await fetch('/api/voce/prepara', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({frasi: testi, voce: VOCE.voce}),
+    });
+  } catch (e) {
+    // il precaricamento e' un lusso: se fallisce si ascolta lo stesso
+  } finally {
+    annuncioInCorso = false;
+  }
+}
+
+// Quante frasi si scaricano DAVVERO in anticipo, come file pronti in memoria.
+// Annunciarle al server non basta: l'annuncio le fa generare, ma quando arriva
+// il turno il browser deve comunque scaricarle, e quel download e' l'attesa che
+// si sente fra una frase e l'altra. Sei frasi sono ~40 secondi di ascolto:
+// abbastanza perche' il download successivo finisca sempre in tempo, poche
+// abbastanza da non tenere in memoria mezzo capitolo.
+const AVANTI = 6;
+
+function precaricaProssime() {
+  for (let k = 1; k <= AVANTI; k++) {
+    const f = VOCE.frasi[VOCE.i + k];
+    if (f) urlDellaFrase(f.testo).catch(() => {});   // partono insieme, non in fila
+  }
+  annunciaProssime(VOCE.i + 1 + AVANTI, 100);
+  sbircia();
+}
+
+// Il blocco successivo, letto in anticipo.
+//
+// Senza questo, alla fine di ogni paragrafo il lettore chiedeva il blocco dopo
+// e ripartiva da zero: nessuna frase pronta, quindi la PRIMA DI OGNI BLOCCO era
+// sempre un'attesa piena. E' il "si ferma a ogni blocco" che si sente.
+//
+// La difficolta' e' che `vista.tts.next()` CONSUMA il cursore: non si puo'
+// sbirciare senza spostarsi. Quindi lo si legge in anticipo e lo si tiene da
+// parte, e quando il blocco finisce si usa quello invece di chiederne un altro.
+async function sbircia() {
+  const restano = VOCE.frasi.length - VOCE.i - 1;
+  if (restano > 3 || VOCE.prossimo || VOCE.sbirciando) return;
+  VOCE.sbirciando = true;
+  try {
+    const ssml = vista.tts.next();
+    if (ssml) {
+      const frasi = frasiDaSSML(ssml);
+      VOCE.prossimo = frasi;
+      // le prime del blocco nuovo si scaricano ADESSO, mentre il vecchio suona
+      for (let k = 0; k < Math.min(3, frasi.length); k++) {
+        urlDellaFrase(frasi[k].testo).catch(() => {});
+      }
+    } else {
+      VOCE.prossimo = [];          // fine del capitolo: niente da sbirciare
+    }
+  } catch (e) {
+    VOCE.prossimo = null;          // se non riesce, si fara' come prima
+  } finally {
+    VOCE.sbirciando = false;
+  }
+}
+
+// Dall'SSML di foliate alle frasi da leggere. Non ci interessa il markup:
+// solo il nome del mark (per evidenziare) e il testo (per la voce).
+function frasiDaSSML(ssml) {
+  if (!ssml) return [];
+  let doc;
+  try { doc = new DOMParser().parseFromString(ssml, 'application/xml'); }
+  catch (e) { return []; }
+  if (doc.querySelector('parsererror')) return [];
+  const fuori = [];
+  let corrente = null;
+  (function cammina(n) {
+    if (n.nodeType === 1 && n.localName === 'mark') {
+      corrente = {mark: n.getAttribute('name'), testo: ''};
+      fuori.push(corrente);
+      return;
+    }
+    if (n.nodeType === 3) { if (corrente) corrente.testo += n.nodeValue; return; }
+    for (const f of n.childNodes) cammina(f);
+  })(doc.documentElement);
+
+  // Senza mark (paragrafo di una sola frase) si legge tutto il blocco.
+  if (!fuori.length) {
+    const t = (doc.documentElement.textContent || '').replace(/\s+/g, ' ').trim();
+    return t ? spezzaSeLungo({mark: null, testo: t}) : [];
+  }
+  return fuori
+    .map(f => ({mark: f.mark, testo: f.testo.replace(/\s+/g, ' ').trim()}))
+    .filter(f => f.testo.length > 1)
+    .flatMap(spezzaSeLungo);
+}
+
+// Il server rifiuta le frasi oltre 1600 caratteri. Un paragrafo senza
+// punteggiatura forte puo' superarli: senza questo taglio arriverebbe un 413 e
+// il libro si zittirebbe proprio li', per sempre.
+const MAX_CARATTERI_FRASE = 1200;
+function spezzaSeLungo(f) {
+  if (f.testo.length <= MAX_CARATTERI_FRASE) return [f];
+  const pezzi = [];
+  let resto = f.testo;
+  while (resto.length > MAX_CARATTERI_FRASE) {
+    let taglio = resto.lastIndexOf(' ', MAX_CARATTERI_FRASE);
+    if (taglio <= 0) taglio = MAX_CARATTERI_FRASE;
+    pezzi.push({mark: f.mark, testo: resto.slice(0, taglio).trim()});
+    resto = resto.slice(taglio).trim();
+  }
+  if (resto) pezzi.push({mark: f.mark, testo: resto});
+  // Stesso mark per tutti i pezzi: l'evidenziazione resta sulla frase intera
+  // mentre la voce la attraversa, che e' anche il comportamento piu' sensato.
+  return pezzi;
+}
+
+// Un filo di silenzio in ciclo: se l'audio tace del tutto per qualche secondo
+// iPhone chiude la sessione, e per farla ripartire servirebbe un altro tocco
+// sullo schermo — cioe' prendere il telefono in mano mentre si guida.
+function tieniVivaLaSessione() {
+  try {
+    const a = elementiAudio()[0];
+    if (!a.paused) return;
+    a.src = '/static/audio/silenzio-1s.mp3';
+    a.loop = true;
+    a.play().catch(() => {});
+  } catch (e) {}
+}
+
+function dipingiFrase(range) {
+  try {
+    const doc = range.startContainer.ownerDocument;
+    const win = doc && doc.defaultView;
+    if (!win || !win.CSS || !win.CSS.highlights || !win.Highlight) return;
+    win.CSS.highlights.set('voce', new win.Highlight(range));
+  } catch (e) { /* l'evidenziazione e' un di piu': non deve fermare l'ascolto */ }
+}
+
+function evidenziaEInsegui(range) {
+  dipingiFrase(range);
+  // Fa girare pagina da sola quando la voce esce dallo schermo.
+  // false = "navigazione", non "selezione": col secondo foliate tratta la frase
+  // come testo selezionato dall'utente e a ogni frase spuntava il fumetto delle
+  // evidenziazioni sopra il libro.
+  try { vista.renderer.scrollToAnchor(range.cloneRange(), false); } catch (e) {}
+  // La frase che sta suonando diventa la posizione del libro, con la stessa
+  // funzione che usa la lettura: e' qui che ascolto e lettura restano una cosa
+  // sola. Il salvataggio e' gia' limitato a uno ogni due secondi.
+  try {
+    // L'indice va chiesto al renderer ADESSO, non preso dall'ultimo evento
+    // relocate: quell'evento arriva DOPO il cambio di sezione, quindi sul primo
+    // paragrafo di un capitolo nuovo l'indice sarebbe ancora quello vecchio e il
+    // CFI punterebbe al capitolo precedente. E' cosi' che l'ascolto "tornava
+    // indietro e ripeteva il capitolo".
+    const indiceVero = vista.renderer?.getContents?.()[0]?.index;
+    const cfi = vista.getCFI(typeof indiceVero === 'number' ? indiceVero : indiceSezione, range);
+    if (cfi) salvaPosizione(cfi, posCorrente.percent || 0, $('posizione').textContent);
+  } catch (e) {}
+}
+
+async function preparaTTS(daCapo) {
+  if (daCapo) vista.tts = null;
+  await vista.initTTS('sentence', evidenziaEInsegui);
+}
+
+// Il paragrafo successivo. Restituisce false quando la sezione e' finita.
+async function prossimoParagrafo(primaVolta, riprendiDalSegno) {
+  let ssml = null;
+  if (primaVolta && riprendiDalSegno !== false) {
+    // Si riparte dal punto in cui si era rimasti a leggere, non dall'inizio
+    // del capitolo: e' la stessa posizione, che si sia letto o ascoltato.
+    ssml = await daPosizioneSalvata();
+    if (!ssml) ssml = vista.tts.start();
+  } else if (primaVolta) {
+    ssml = vista.tts.start();      // capitolo nuovo: si comincia dal suo inizio
+  } else if (VOCE.prossimo) {
+    // gia' letto in anticipo, con le prime frasi gia' scaricate: si riparte
+    // senza un solo istante di attesa
+    const pronte = VOCE.prossimo;
+    VOCE.prossimo = null;
+    VOCE.frasi = pronte;
+    VOCE.i = 0;
+    return pronte.length ? true : prossimoParagrafo(false);
+  } else {
+    ssml = vista.tts.next();
+  }
+  if (!ssml) return false;
+  VOCE.frasi = frasiDaSSML(ssml);
+  VOCE.i = 0;
+  return VOCE.frasi.length ? true : prossimoParagrafo(false);
+}
+
+async function daPosizioneSalvata() {
+  const dove = posCorrente.location;
+  if (!dove || !String(dove).startsWith('epubcfi')) return null;
+  try {
+    const risolto = await vista.resolveCFI(dove);
+    if (!risolto || risolto.index !== indiceSezione) return null;
+    const doc = vista.renderer.getContents()[0].doc;
+    const r = typeof risolto.anchor === 'function' ? risolto.anchor(doc) : risolto.anchor;
+    if (!r || !r.startContainer) return null;
+    return vista.tts.from(r);
+  } catch (e) { return null; }
+}
+
+async function passaAllaSezioneSuccessiva() {
+  const c = vista.renderer.getContents()[0];
+  const primaDoc = c?.doc;
+  const primaIdx = typeof c?.index === 'number' ? c.index : indiceSezione;
+  // Attenzione: vista.next() gira UNA PAGINA, non un capitolo. Se al capitolo
+  // ne restano (succede sempre in scorrimento, e ogni volta che l'ultimo testo
+  // parlabile non e' sull'ultima pagina) il documento non cambia, si aspettava
+  // invano e si annunciava "Libro finito" a meta' libro.
+  try { await vista.goTo(primaIdx + 1); } catch (e) { return false; }
+  for (let attesa = 0; attesa < 60; attesa++) {
+    const ora = vista.renderer.getContents()[0];
+    if (ora?.doc && ora.doc !== primaDoc) { await preparaTTS(true); return true; }
+    await new Promise(r => setTimeout(r, 100));
+  }
+  return false;
+}
+
+function avvisoSpezzettato(pezzi) {
+  const d = document.createElement('div');
+  d.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:64px;' +
+    'z-index:44;max-width:520px;background:var(--barra);border:1px solid var(--linea);' +
+    'border-radius:12px;padding:10px 14px;font-size:12.5px;line-height:1.5;' +
+    'color:var(--tenue);box-shadow:0 6px 24px rgba(0,0,0,.25)';
+  d.innerHTML = 'Questo libro è diviso in ' + pezzi + ' pezzi molto corti: sfogliandolo ' +
+    'verrebbero pagine quasi vuote, quindi l\'ho aperto in <b>scorrimento</b>. ' +
+    'Da <b>Aa</b> puoi rimetterlo a “Sfoglia”. <span style="text-decoration:underline;' +
+    'cursor:pointer">ho capito</span>';
+  d.querySelector('span').onclick = () => d.remove();
+  document.body.append(d);
+  setTimeout(() => d.remove(), 15000);
+}
+
+// ---- preparare tutto il libro per l'offline --------------------------------
+//
+// Si percorre il libro SENZA disegnarlo: `createDocument()` da' il documento di
+// ogni capitolo e la stessa classe TTS che usa il lettore ne ricava le stesse
+// identiche frasi. E' la parte che conta: se le frasi non fossero identiche, il
+// deposito non verrebbe mai usato in riproduzione.
+async function frasiDiTuttoIlLibro(quando) {
+  const {TTS} = await import('/static/vendor/foliate/tts.js');
+  const {textWalker} = await import('/static/vendor/foliate/text-walker.js');
+  const sezioni = vista.book.sections || [];
+  const tutte = [];
+  for (let i = 0; i < sezioni.length; i++) {
+    if (!sezioni[i].createDocument) continue;
+    let doc;
+    try { doc = await sezioni[i].createDocument(); } catch (e) { continue; }
+    try {
+      const t = new TTS(doc, textWalker, () => {}, 'sentence');
+      let ssml = t.start();
+      while (ssml) {
+        for (const f of frasiDaSSML(ssml)) tutte.push(f.testo);
+        ssml = t.next();
+      }
+    } catch (e) { /* un capitolo illeggibile non ferma il libro */ }
+    if (quando) quando(i + 1, sezioni.length, tutte.length);
+  }
+  return tutte;
+}
+
+let preparazione = null;      // {annulla: bool}
+
+async function preparaOffline() {
+  if (preparazione) { preparazione.annulla = true; return; }
+  if (motore !== 'epub') { statoVoce('Per ora si prepara solo l\'EPUB'); return; }
+  preparazione = {annulla: false};
+  const b = $('voce-scarica');
+  if (b) { b.textContent = '■'; b.title = 'Interrompi la preparazione'; }
+  try {
+    statoVoce('Leggo il libro…');
+    const frasi = await frasiDiTuttoIlLibro((fatte, tot) =>
+      statoVoce('Leggo il libro… ' + fatte + '/' + tot));
+    let pronte = 0, nuove = 0;
+    const t0 = Date.now();
+    for (let i = 0; i < frasi.length; i++) {
+      if (preparazione.annulla) break;
+      const gia = await dalDeposito(frasi[i], VOCE.voce);
+      if (gia) { URL.revokeObjectURL(gia); pronte++; }
+      else {
+        try { await urlDellaFrase(frasi[i]); nuove++; pronte++; }
+        catch (e) { /* una frase persa non ferma il libro */ }
+      }
+      if (i % 5 === 0 || i === frasi.length - 1) {
+        const perc = Math.round((i + 1) / frasi.length * 100);
+        const restanti = nuove ? Math.round((frasi.length - i) *
+          ((Date.now() - t0) / 1000) / Math.max(nuove, 1) / 60) : 0;
+        statoVoce('Preparo l\'ascolto… ' + perc + '%' +
+                  (restanti > 1 ? ' (~' + restanti + ' min)' : ''));
+      }
+    }
+    statoVoce(preparazione.annulla
+      ? 'Preparazione interrotta: ' + pronte + ' frasi pronte'
+      : 'Pronto per l\'offline: ' + pronte + ' frasi sul telefono');
+  } catch (e) {
+    statoVoce('Preparazione fallita: ' + (e.message || e));
+  } finally {
+    preparazione = null;
+    const b2 = $('voce-scarica');
+    if (b2) { b2.textContent = '⤓'; b2.title = 'Prepara tutto il libro per l\'offline'; }
+  }
+}
+
+function statoVoce(testo) { $('voce-stato').textContent = testo; }
+
+// Briciole del ciclo d'ascolto. Lo stato interno (quale frase, quante nel
+// paragrafo, quale capitolo) non e' leggibile da fuori: senza queste, capire
+// perche' la voce si pianta significa indovinare.
+const TAPPE_VOCE = [];
+function tappaVoce(m) {
+  TAPPE_VOCE.push(Math.round(performance.now() / 1000) + 's ' + m);
+  if (TAPPE_VOCE.length > 40) TAPPE_VOCE.shift();
+}
+function raccontaAscolto(motivo) {
+  try {
+    navigator.sendBeacon('/api/diagnostica', new Blob([JSON.stringify({
+      motivo: 'ascolto: ' + motivo, libro: JOB, formato: FORMATO,
+      suona: VOCE.suona, frase: VOCE.i, frasiNelParagrafo: VOCE.frasi.length,
+      generazione: VOCE.generazione, cicloInCorso: cicloInCorso,
+      sezione: (() => { try { return vista.renderer.getContents()[0].index; } catch (e) { return null; } })(),
+      voce: VOCE.voce, velocita: VOCE.velocita,
+      tappe: TAPPE_VOCE.join(' | '),
+    })], {type: 'application/json'}));
+  } catch (e) {}
+}
+
+async function suonaFrase() {
+  const mia = VOCE.generazione;
+  const f = VOCE.frasi[VOCE.i];
+  if (!f) return 'fine';
+
+  // In macchina la rete va e viene: fermarsi al primo intoppo vorrebbe dire
+  // costringere chi guida a prendere in mano il telefono. Si aspetta, si
+  // riprova, e la sessione audio resta viva con un filo di silenzio, cosi'
+  // iPhone non la chiude e la voce riparte da sola.
+  let url = null;
+  for (let tentativo = 0; tentativo < 6 && !url; tentativo++) {
+    if (mia !== VOCE.generazione || !VOCE.suona) return 'ferma';
+    try {
+      statoVoce(VOCE.cache.has(f.testo) ? 'In ascolto' : 'Preparo la voce…');
+      url = await urlDellaFrase(f.testo);
+    } catch (e) {
+      if (mia !== VOCE.generazione) return 'ferma';
+      if (e.stato === 429) { fermaAscolto(e.message || 'Tetto giornaliero raggiunto'); return 'ferma'; }
+      if (e.stato === 413) {  // frase troppo lunga: si salta, non si ammutolisce
+        statoVoce('Salto una frase troppo lunga');
+        return 'fine';
+      }
+      if (tentativo === 5) {
+        // Non ci si arrende: si continua a riprovare piano, tenendo viva la
+        // sessione audio. In galleria o con il telefono in tasca la rete torna,
+        // e la voce deve ripartire da sola senza che l'utente tocchi nulla.
+        statoVoce('Rete assente: riprovo…');
+        raccontaAscolto('rete assente, continuo a riprovare');
+        tieniVivaLaSessione();
+        await new Promise(r => setTimeout(r, 5000));
+        tentativo = -1;                   // si ricomincia il giro dei tentativi
+        continue;
+      }
+      statoVoce('Attendo la rete… (' + (tentativo + 1) + ')');
+      tieniVivaLaSessione();
+      await new Promise(r => setTimeout(r, 700 * Math.pow(2, tentativo)));
+    }
+  }
+  if (!url) return 'ferma';
+  if (mia !== VOCE.generazione || !VOCE.suona) return 'ferma';
+
+  // setMark evidenzia la frase e, tramite evidenziaEInsegui, gira pagina e
+  // salva la posizione: da qui in poi lettura e ascolto sono lo stesso punto.
+  if (f.mark) { try { vista.tts.setMark(f.mark); } catch (e) {} }
+  aggiornaMediaSession(f.testo);
+
+  tappaVoce('suono frase ' + VOCE.i + '/' + VOCE.frasi.length + ' «' + f.testo.slice(0, 28) + '»');
+  const el = elementiAudio()[VOCE.turno % 2];
+  VOCE.turno++;
+  el.loop = false;                      // spegne l'eventuale silenzio di attesa
+  el.src = url;
+  el.playbackRate = VOCE.velocita;
+  statoVoce('In ascolto');
+  precaricaProssime();
+
+  // Attesa della fine della frase, con un cane da guardia.
+  //
+  // Prima si aspettavano solo gli eventi "ended" o "error". Se l'audio si pianta
+  // a meta' (rete che stalla, elemento in stallo, scheda sospesa) non arriva NE'
+  // l'uno NE' l'altro: la Promise resta appesa per sempre e l'ascolto muore in
+  // silenzio. E' il difetto per cui "dopo un po' non funziona piu'".
+  // Ora si controlla che il tempo di riproduzione avanzi davvero: se sta fermo
+  // per otto secondi, si molla quella frase e si prosegue.
+  const esito = await new Promise(risolvi => {
+    let ultimoTempo = -1, fermoDa = 0;
+    const guardia = setInterval(() => {
+      // Falla della prima versione: saltava il controllo quando l'elemento era
+      // in pausa. Ma un audio che resta in pausa mentre l'ascolto e' acceso E'
+      // uno stallo — ed e' proprio il caso che bloccava la voce sulla stessa
+      // frase per minuti, con la barra che diceva "In ascolto".
+      if (!VOCE.suona) return;                     // pausa voluta: non e' uno stallo
+      if (el.paused || el.currentTime === ultimoTempo) fermoDa++;
+      else { fermoDa = 0; ultimoTempo = el.currentTime; }
+      if (fermoDa >= 8) chiudi('stallo');
+    }, 1000);
+    const chiudi = motivo => {
+      clearInterval(guardia);
+      el.removeEventListener('ended', suFine);
+      el.removeEventListener('error', suErrore);
+      if (VOCE.interrompi === chiudi) VOCE.interrompi = null;
+      risolvi(motivo);
+    };
+    const suFine = () => chiudi('fine');
+    const suErrore = () => chiudi('errore');
+    el.addEventListener('ended', suFine, {once: true});
+    el.addEventListener('error', suErrore, {once: true});
+    // Chi salta una frase o preme pausa chiude questa attesa dall'esterno,
+    // invece di lasciare in giro un secondo ciclo che si contende l'audio.
+    VOCE.interrompi = chiudi;
+    el.play().catch(() => chiudi('bloccato'));
+  });
+
+  tappaVoce('esito ' + esito + ' t=' + (el.currentTime || 0).toFixed(1));
+  if (esito === 'stallo') {
+    // Distinzione che conta: se il tempo e' rimasto a zero l'audio non e' MAI
+    // partito — e' il permesso di riproduzione, non la rete. Proseguire
+    // vorrebbe dire attraversare il libro in silenzio (pagando ogni frase, sul
+    // motore a pagamento) mentre l'utente crede di stare ascoltando.
+    if (!el.currentTime) {
+      fermaAscolto('Tocca ▶ per far partire l\'audio');
+      raccontaAscolto('audio mai partito');
+      return 'ferma';
+    }
+    statoVoce('Frase saltata: audio bloccato');
+    raccontaAscolto('stallo');
+  }
+  // play() rifiutato significa permesso audio scaduto (succede tornando sulla
+  // scheda dopo molto tempo). Proseguire vorrebbe dire macinare il libro in
+  // silenzio, sintetizzando e pagando ogni frase senza che si senta nulla.
+  if (esito === 'bloccato') { fermaAscolto('Tocca ▶ per riprendere'); return 'ferma'; }
+  if (esito === 'salta' || esito === 'ferma') return esito;
+  if (mia !== VOCE.generazione || !VOCE.suona) return 'ferma';
+  return 'fine';
+}
+
+// Un solo ciclo alla volta. Prima ogni salto di frase ne faceva partire un
+// altro mentre il precedente era ancora dentro un await: due cicli si
+// contendevano gli stessi due elementi audio e lo stesso indice, e l'ascolto
+// diventava imprevedibile.
+let cicloInCorso = false;
+
+async function cicloAscolto() {
+  if (cicloInCorso) return;
+  cicloInCorso = true;
+  try { await cicloAscoltoInterno(); } finally { cicloInCorso = false; }
+}
+
+async function cicloAscoltoInterno() {
+  const mia = VOCE.generazione;
+  while (VOCE.suona && mia === VOCE.generazione) {
+    if (VOCE.i >= VOCE.frasi.length) {
+      let avanti = false;
+      tappaVoce('paragrafo finito, cerco il prossimo');
+      try { avanti = await prossimoParagrafo(false); } catch (e) { avanti = false; tappaVoce('prossimoParagrafo ERRORE ' + e.message); }
+      if (!avanti) {
+        const ultimo = !(vista.book?.sections?.[indiceSezione + 1]);
+        tappaVoce('fine capitolo, ultimo=' + ultimo);
+        const ancora = ultimo ? false : await passaAllaSezioneSuccessiva();
+        if (!ancora) { fermaAscolto(ultimo ? 'Libro finito' : 'Capitolo non caricato'); return; }
+        try { avanti = await prossimoParagrafo(true, false); } catch (e) { avanti = false; }
+        if (!avanti) { fermaAscolto('Libro finito'); return; }
+      }
+      continue;
+    }
+    const esito = await suonaFrase();
+    if (esito === 'ferma') return;
+    // 'salta' significa che l'indice l'ha gia' spostato chi ha premuto il tasto:
+    // avanzare di nuovo qui salterebbe due frasi invece di una.
+    if (esito !== 'salta') VOCE.i++;
+  }
+}
+
+// Su iPhone un elemento audio puo' suonare solo se il PRIMO play() parte dentro
+// il gesto dell'utente. `load()` non basta: non e' una riproduzione. E il primo
+// play() vero arriva solo dopo la risposta del server, cioe' fuori dal gesto.
+// Quindi qui si fa partire mezzo decimo di secondo di silenzio, subito, in modo
+// sincrono: da quel momento i due elementi sono "sbloccati" per sempre e la voce
+// puo' continuare anche a schermo spento, in tasca, in macchina.
+function sbloccaAudio() {
+  elementiAudio().forEach(a => {
+    try {
+      a.src = '/static/audio/silenzio-breve.mp3';
+      const p = a.play();
+      if (p && p.then) p.then(() => { try { a.pause(); } catch (e) {} }).catch(() => {});
+    } catch (e) {}
+  });
+}
+
+// ---- ascolto dei PDF -----------------------------------------------------
+// Nel PDF non c'e' foliate: il testo e' uno strato di riquadri trasparenti
+// sopra l'immagine della pagina scansionata. Le frasi si ricavano concatenando
+// quei riquadri, e l'evidenziazione si disegna sopra i riquadri coperti dalla
+// frase in ascolto — la stessa tecnica gia' usata per le sottolineature.
+
+function testoDellaPagina(box) {
+  const pezzi = [...box.querySelectorAll('.strato-testo span')];
+  let testo = '';
+  const mappa = [];
+  for (const s of pezzi) {
+    const t = s.textContent || '';
+    if (!t) continue;
+    mappa.push({elemento: s, da: testo.length, a: testo.length + t.length});
+    testo += t;
+    if (!/\s$/.test(t)) testo += ' ';   // fra un riquadro e l'altro non c'e' spazio
+  }
+  return {testo, mappa};
+}
+
+function dipingiFrasePdf(box, mappa, inizio, fine) {
+  box.querySelectorAll('.segno-voce').forEach(e => e.remove());
+  const riquadro = box.getBoundingClientRect();
+  for (const m of mappa) {
+    if (m.a <= inizio || m.da >= fine) continue;
+    const r = m.elemento.getBoundingClientRect();
+    const d = document.createElement('div');
+    d.className = 'segno segno-voce';
+    d.style.left = (r.left - riquadro.left) + 'px';
+    d.style.top = (r.top - riquadro.top) + 'px';
+    d.style.width = r.width + 'px';
+    d.style.height = r.height + 'px';
+    box.append(d);
+  }
+}
+
+async function frasiDellaPaginaPdf(n) {
+  const box = document.querySelector('#pdf .pagina[data-n="' + n + '"]');
+  if (!box) return null;
+  // Se la pagina non e' ancora stata disegnata non ha lo strato di testo:
+  // la si porta a vista e si aspetta, invece di saltarla in silenzio.
+  for (let attesa = 0; attesa < 30 && !box.querySelector('.strato-testo'); attesa++) {
+    if (attesa === 0) box.scrollIntoView();
+    await new Promise(r => setTimeout(r, 200));
+  }
+  const {testo, mappa} = testoDellaPagina(box);
+  if (!testo.trim()) return {box, mappa, frasi: []};
+  const d = await api('/api/frasi', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({testo}),
+  });
+  return {box, mappa, frasi: d.frasi || []};
+}
+
+async function cicloAscoltoPdf() {
+  const mia = VOCE.generazione;
+  let n = paginaCorrente || 1;
+  while (VOCE.suona && mia === VOCE.generazione) {
+    const pagina = await frasiDellaPaginaPdf(n);
+    if (!pagina) { fermaAscolto('Libro finito'); return; }
+    for (const f of pagina.frasi) {
+      if (!VOCE.suona || mia !== VOCE.generazione) return;
+      VOCE.frasi = [{mark: null, testo: f.testo}];
+      VOCE.i = 0;
+      dipingiFrasePdf(pagina.box, pagina.mappa, f.inizio, f.fine);
+      salvaPosizione('p' + n, n / pdfDoc.numPages, 'Pagina ' + n);
+      const esito = await suonaFrase();
+      if (esito === 'ferma') return;
+    }
+    pagina.box.querySelectorAll('.segno-voce').forEach(e => e.remove());
+    n += 1;
+    if (n > pdfDoc.numPages) { fermaAscolto('Libro finito'); return; }
+    document.querySelector('#pdf .pagina[data-n="' + n + '"]')?.scrollIntoView();
+  }
+}
+
+// Battito d'ascolto. Ogni minuto il lettore racconta al server dove si trova.
+// Serve per un motivo preciso: quando l'ascolto si e' bloccato sul telefono, nel
+// registro del server non c'era una sola traccia di che cosa stesse aspettando,
+// e la causa e' rimasta un'ipotesi. Ora resta scritto.
+let battito = null;
+function avviaBattito() {
+  clearInterval(battito);
+  battito = setInterval(() => {
+    if (VOCE.suona) raccontaAscolto('battito');
+  }, 60000);
+}
+function fermaBattito() { clearInterval(battito); battito = null; }
+
+async function avviaAscolto() {
+  mostraSpesa();          // il contatore si aggiorna quando cominci
+  if (VOCE.suona) return;
+  sbloccaAudio();                       // PRIMA di qualunque await: e' il gesto
+  VOCE.suona = true;
+  VOCE.generazione++;
+  $('voce-play').textContent = '⏸';
+  avviaBattito();
+  if (motore === 'pdf') { cicloAscoltoPdf(); return; }
+  try {
+    // Ricostruire il TTS azzera il suo iteratore E la mappa dei mark. Se si
+    // tengono le frasi di prima, setMark lancia (in silenzio): niente
+    // evidenziazione, niente posizione salvata, e finito il paragrafo si
+    // riparte dal PRIMO del capitolo. E' il "ripete il capitolo".
+    const ttsPrima = vista.tts;
+    await preparaTTS(false);        // initTTS non fa nulla se il capitolo e' lo stesso
+    if (vista.tts !== ttsPrima) { VOCE.frasi = []; VOCE.i = 0; VOCE.prossimo = null; }
+    if (!VOCE.frasi.length) await prossimoParagrafo(true);
+  } catch (e) {
+    // Dire QUALE errore: un messaggio generico costringe a indovinare, ed e'
+    // esattamente cio' che ha fatto perdere ore col lettore bianco.
+    fermaAscolto('Ascolto non avviato — ' + (e && e.message ? e.message : e));
+    raccontaAlServer('avvio ascolto fallito',
+                     (e && e.name ? e.name + ': ' : '') + (e && e.message ? e.message : e) +
+                     ' | ' + (e && e.stack ? String(e.stack).slice(0, 400) : ''));
+    return;
+  }
+  cicloAscolto().catch(e => {
+    fermaAscolto('Ascolto interrotto — ' + (e && e.message ? e.message : e));
+    raccontaAlServer('ciclo ascolto interrotto', e && e.stack ? String(e.stack).slice(0, 400) : String(e));
+  });
+}
+
+function fermaAscolto(messaggio) {
+  fermaBattito();
+  fermaPreparazione();       // niente piu' generazione a pagamento: sei in pausa
+  mostraSpesa();
+  VOCE.suona = false;
+  VOCE.generazione++;
+  if (VOCE.interrompi) VOCE.interrompi('ferma');
+  elementiAudio().forEach(a => { try { a.pause(); } catch (e) {} });
+  $('voce-play').textContent = '▶';
+  if (messaggio) statoVoce(messaggio);
+  else statoVoce('In pausa');
+  if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
+  salvaSubito();
+}
+
+function saltaFrase(passo) {
+  // Avanti: la frase corrente e' gia' quella giusta da lasciare, si passa alla
+  // successiva. Indietro: si torna a quella prima di quella in corso.
+  const nuovo = passo > 0 ? VOCE.i + 1 : VOCE.i - 1;
+  VOCE.i = Math.max(0, nuovo);
+  elementiAudio().forEach(a => { try { a.pause(); } catch (e) {} });
+  if (VOCE.interrompi) VOCE.interrompi('salta');
+  else if (VOCE.suona) cicloAscolto();
+}
+
+let ultimoCapitoloAnnunciato = null;
+function aggiornaMediaSession(frase) {
+  if (!('mediaSession' in navigator)) return;
+  // Il display dell'auto va aggiornato al cambio di capitolo. Riscriverlo a ogni
+  // frase lo fa lampeggiare di continuo e distrae chi guida.
+  const capitolo = $('posizione').textContent || 'In lettura';
+  if (capitolo === ultimoCapitoloAnnunciato) {
+    try { navigator.mediaSession.playbackState = VOCE.suona ? 'playing' : 'paused'; } catch (e) {}
+    return;
+  }
+  ultimoCapitoloAnnunciato = capitolo;
+  try {
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: capitolo,
+      artist: {{ titolo|tojson }},
+      album: 'Ultimate Translator',
+      artwork: [{src: '/api/cover/' + JOB, sizes: '512x512', type: 'image/jpeg'}],
+    });
+    navigator.mediaSession.playbackState = VOCE.suona ? 'playing' : 'paused';
+  } catch (e) {}
+}
+
+function collegaMediaSession() {
+  if (!('mediaSession' in navigator)) return;
+  const h = (nome, fn) => { try { navigator.mediaSession.setActionHandler(nome, fn); } catch (e) {} };
+  h('play', () => avviaAscolto());
+  h('pause', () => fermaAscolto());
+  // Niente 'previoustrack' / 'nexttrack': registrandoli, CarPlay e i comandi al
+  // volante smettono di essere "indietro/avanti di poco" e diventano
+  // "traccia precedente/successiva". Sul volante c'e' un tasto solo: un tocco
+  // in autostrada salterebbe un capitolo intero. Restano i due salti brevi.
+  h('seekbackward', () => saltaFrase(-1));
+  h('seekforward', () => saltaFrase(1));
+}
+
+// ---- pannello della voce -------------------------------------------------
+let vociDisponibili = [];
+const audioProva = new Audio();
+
+function mostraVoci() {
+  $('lista-voci').innerHTML = vociDisponibili.map(v =>
+    '<button class="voce-riga' + (v.id === VOCE.voce ? ' on' : '') + '" data-voce="' + v.id + '">' +
+      '<span><b>' + esc(v.nome) + '</b>' +
+      '<small>' + esc(v.genere) + ' · ' + esc(v.nota) + '</small></span>' +
+      '<span class="voce-prova" data-prova="' + v.id + '">▶ prova</span>' +
+    '</button>').join('');
+  document.querySelectorAll('#lista-voci .voce-riga').forEach(b => {
+    b.onclick = ev => {
+      const prova = ev.target.closest('[data-prova]');
+      if (prova) {
+        ev.stopPropagation();
+        audioProva.src = '/api/voce/campione/' + prova.dataset.prova;
+        audioProva.playbackRate = VOCE.velocita;
+        audioProva.play().catch(() => {});
+        return;
+      }
+      VOCE.voce = b.dataset.voce;
+      VOCE.cache.clear();               // la voce e' cambiata: l'audio vecchio non vale piu'
+      salvaScelteVoce();
+      mostraVoci();
+    };
+  });
+}
+
+function salvaScelteVoce() {
+  api('/api/book/' + JOB + '/ascolto', {
+    method: 'PUT', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({voce: VOCE.voce, velocita: VOCE.velocita}),
+  });
+}
+
+async function caricaVoci() {
+  try {
+    const d = await api('/api/voci?libro=' + JOB);
+    vociDisponibili = d.voci || [];
+    VOCE.voce = (d.scelta && d.scelta.voce) || d.predefinita;
+    VOCE.velocita = (d.scelta && d.scelta.velocita) || 1;
+    $('voce-cursore').value = VOCE.velocita;
+    aggiornaEtichettaVelocita();
+    if (!d.disponibile) {
+      statoVoce('Manca la chiave OpenAI: nessuna voce');
+      $('voce-play').disabled = true;
+    }
+    // Dire sempre quale motore sta parlando e se costa: sapere di stare
+    // spendendo (o di non spendere) non deve essere una deduzione.
+    const t = d.tetto || {};
+    $('voce-nota').textContent = d.gratis
+      ? 'Voce sul tuo Mac: gratis, funziona anche senza rete.'
+      : 'Voce a pagamento (OpenAI). Oggi hai usato ' +
+        Math.round((t.usati || 0) / 1000) + ' mila caratteri su ' +
+        Math.round((t.massimo || 0) / 1000) + '. Riascoltare non costa nulla.';
+    mostraVoci();
+  } catch (e) {
+    statoVoce('Voci non caricate');
+  }
+}
+
+function aggiornaEtichettaVelocita() {
+  const t = VOCE.velocita.toFixed(1).replace('.', ',') + '×';
+  $('voce-velocita').textContent = t;
+  $('voce-cursore-val').textContent = t;
+  elementiAudio().forEach(a => { a.playbackRate = VOCE.velocita; });
+}
+
+function apriAscolto() {
+  VOCE.acceso = true;
+  $('barra-basso').hidden = true;
+  $('barra-voce').hidden = false;
+  $('btn-ascolta').classList.add('attivo');
+  collegaMediaSession();
+  if (!vociDisponibili.length) caricaVoci();
+}
+
+function chiudiAscolto() {
+  fermaAscolto('');
+  VOCE.acceso = false;
+  $('barra-voce').hidden = true;
+  $('barra-basso').hidden = false;
+  $('btn-ascolta').classList.remove('attivo');
+  try {
+    const doc = vista?.renderer?.getContents?.()[0]?.doc;
+    doc?.defaultView?.CSS?.highlights?.delete('voce');
+  } catch (e) {}
+  document.querySelectorAll('.segno-voce').forEach(e => e.remove());
+}
+
+$('btn-ascolta').onclick = () => (VOCE.acceso ? chiudiAscolto() : apriAscolto());
+$('voce-play').onclick = () => (VOCE.suona ? fermaAscolto('') : avviaAscolto());
+$('voce-avanti').onclick = () => saltaFrase(1);
+$('voce-indietro').onclick = () => saltaFrase(-1);
+$('voce-chiudi').onclick = () => chiudiAscolto();
+$('voce-scelta').onclick = () => apri('pan-voce');
+
+// "Ascolta da qui": si tiene il punto scelto dall'utente e si fa ripartire la
+// voce da li'. E' l'unico modo per dire "riprendi da questa frase" senza dover
+// saltare avanti a mano una frase alla volta.
+async function ascoltaDaQui() {
+  nascondiFumetto();
+  try {
+    if (motore === 'pdf') {
+      // Nel PDF il punto e' una pagina: si riparte da quella che si sta guardando.
+      if (!VOCE.acceso) apriAscolto();
+      fermaAscolto('');
+      await new Promise(r => setTimeout(r, 60));
+      avviaAscolto();
+      return;
+    }
+    const doc = vista.renderer.getContents()[0].doc;
+    const sel = doc.getSelection();
+    if (!sel || !sel.rangeCount) return;
+    const punto = sel.getRangeAt(0).cloneRange();
+    sel.removeAllRanges();                 // via la selezione: ora comanda la voce
+
+    if (!VOCE.acceso) apriAscolto();
+    const stavaSuonando = VOCE.suona;
+    if (stavaSuonando) fermaAscolto('');
+    sbloccaAudio();                        // siamo ancora dentro il gesto del tocco
+    await preparaTTS(true);
+    const ssml = vista.tts.from(punto);
+    if (!ssml) { statoVoce('Non riesco a partire da qui'); return; }
+    VOCE.frasi = frasiDaSSML(ssml);
+    VOCE.i = 0;
+    VOCE.suona = true;
+    VOCE.generazione++;
+    $('voce-play').textContent = '⏸';
+    cicloAscolto();
+  } catch (e) {
+    statoVoce('Non riesco a partire da qui');
+  }
+}
+$('fum-ascolta').onclick = ascoltaDaQui;
+// La velocita' e' il comando che si tocca piu' spesso, e in macchina si tocca
+// senza guardare: un cursore dentro un pannello non va bene. Qui il tasto cicla
+// fra i valori utili e l'effetto e' immediato, anche a meta' frase.
+const VELOCITA = [1, 1.2, 1.5, 1.8, 2, 0.8];
+$('voce-velocita').onclick = () => {
+  const i = VELOCITA.findIndex(v => Math.abs(v - VOCE.velocita) < 0.01);
+  VOCE.velocita = VELOCITA[(i + 1) % VELOCITA.length];
+  $('voce-cursore').value = VOCE.velocita;
+  aggiornaEtichettaVelocita();
+  salvaScelteVoce();
+};
+$('voce-cursore').oninput = e => {
+  VOCE.velocita = parseFloat(e.target.value) || 1;
+  aggiornaEtichettaVelocita();
+};
+$('voce-cursore').onchange = () => salvaScelteVoce();
+
+// Se la scheda finisce in secondo piano l'audio continua (e' il punto: si
+// ascolta col telefono in tasca), ma la posizione va messa al sicuro subito.
+addEventListener('pagehide', () => { if (VOCE.suona) salvaSubito(); });
+
+let qualcosaMostrato = false;
+function segnaMostrato() {
+  qualcosaMostrato = true;
+  // Se il guardiano aveva gia' scritto "il libro non si e' aperto" e il libro
+  // poi si apre lo stesso (caricamento lento, non guasto), quel messaggio deve
+  // sparire: restava appiccicato sopra il testo, dicendo il falso.
+  document.querySelectorAll('#zona > .vuoto').forEach(e => e.remove());
+}
+
+// Racconta al server lo stato interno quando il libro non compare: e' l'unico
+// modo per capire la causa senza chiedere all'utente di fare da tecnico.
+function raccontaAlServer(motivo, errore) {
+  try {
+    const z = document.getElementById('zona');
+    const r = vista?.renderer;
+    navigator.sendBeacon('/api/diagnostica', new Blob([JSON.stringify({
+      motivo, errore: errore ? String(errore) : null,
+      libro: JOB, formato: FORMATO,
+      browser: navigator.userAgent,
+      finestra: innerWidth + 'x' + innerHeight,
+      zona: z ? z.clientWidth + 'x' + z.clientHeight : null,
+      elementoDefinito: !!customElements.get('foliate-view'),
+      renderer: r ? r.tagName : null,
+      rendererDim: r ? r.clientWidth + 'x' + r.clientHeight : null,
+      sezioni: vista?.book?.sections?.length ?? null,
+      flusso: r ? r.getAttribute('flow') : null,
+      tema: PREF.tema, corpo: PREF.dim, colonne: PREF.col,
+      tappe: TAPPE.join(' | '),
+      // Un'estensione che sostituisce il costruttore Blob ha tenuto il lettore
+      // bianco per ore senza lasciare un solo errore: ora lo si vede subito.
+      blobManomesso: (function () {
+        try { return !/\[native code\]/.test(String(Blob)); } catch (e) { return null; }
+      })(),
+      capitoloNonCaricato: guastoSezione,
+    })], {type: 'application/json'}));
+  } catch (e) { /* la diagnosi non deve mai essa stessa rompere la pagina */ }
+}
+
+function mostraGuasto(motivo, dettaglio) {
+  if (qualcosaMostrato) return;
+  const zona = $('zona');
+  if (zona.querySelector(':scope > .vuoto')) return;    // gia' mostrato
+  const avviso = document.createElement('div');
+  avviso.innerHTML =
+    '<div class="vuoto" style="padding:110px 24px 0;max-width:520px;margin:0 auto">' +
+      '<div style="font-size:44px;margin-bottom:14px">📖</div>' +
+      '<div style="font-size:16px;color:var(--inchiostro);margin-bottom:10px">' +
+        esc(motivo) + '</div>' +
+      (dettaglio ? '<div style="font-size:12.5px;opacity:.75;margin-bottom:20px;' +
+        'word-break:break-word">' + esc(dettaglio) + '</div>' : '') +
+      '<button class="scelta" onclick="location.reload(true)">Riprova</button> ' +
+      '<a class="scelta" style="text-decoration:none;display:inline-block" ' +
+         'href="/api/download/' + JOB + '">Scarica il file</a> ' +
+      '<a class="scelta" style="text-decoration:none;display:inline-block" ' +
+         'href="/libreria">Torna ai libri</a>' +
+    '</div>';
+  // Se il PDF sta ancora arrivando, il suo contenitore resta: l'avviso gli va
+  // sopra, e sparisce da solo alla prima pagina disegnata (segnaMostrato).
+  if (zona.querySelector('#pdf')) zona.prepend(avviso.firstChild);
+  else { zona.innerHTML = ''; zona.append(avviso.firstChild); }
+}
+
+(async function () {
+  // Se il modulo non arriva (rete, cache vecchia, browser che non regge i
+  // moduli ES) il guardiano lo dice invece di lasciare il bianco.
+  // Scatta dopo 12 secondi di SILENZIO (nessuna tappa, nessun byte scaricato),
+  // non 12 secondi dopo l'apertura: un libro grande che sta arrivando non e'
+  // un guasto.
+  const guardiano = setInterval(() => {
+    if (qualcosaMostrato) { clearInterval(guardiano); return; }
+    if (Date.now() - ultimaVita < 12000) return;
+    clearInterval(guardiano);
+    raccontaAlServer('12s senza segni di vita: apertura non conclusa');
+    mostraGuasto(
+    'Il libro non si è aperto.',
+    'Prova a ricaricare tenendo premuto il tasto di aggiornamento, oppure ' +
+    'scarica il file e leggilo con l\'app che preferisci.');
+  }, 1000);
+
+  try {
+    if (FORMATO === 'epub') await avviaEpub();
+    else if (FORMATO === 'pdf') await avviaPdf();
+    else {
+      clearInterval(guardiano); segnaMostrato();
+      $('zona').innerHTML = '<div class="vuoto" style="padding-top:120px">' +
+        'Il lettore integrato copre EPUB e PDF.<br>Per questo formato usa il download.</div>';
+      return;
+    }
+    clearInterval(guardiano);
+    if (!qualcosaMostrato && FORMATO === 'epub') {
+      // Caricato ma non disegnato: prima di arrendersi si prova a forzare la
+      // prima pagina. Su alcuni browser il primo rendering non parte da solo.
+      await new Promise(r => setTimeout(r, 1000));
+      if (!qualcosaMostrato) { try { await vista.renderer?.next(); } catch (e) {} }
+
+      // Ultimo ripiego: passare allo SCORRIMENTO, che usa un percorso di
+      // rendering diverso. Non e' piu' la cura del guasto noto (era
+      // un'estensione che sostituiva il costruttore Blob, vedi
+      // static/vendor/foliate/blob-sicuro.js), ma resta la rete di sicurezza
+      // per qualunque problema del solo impaginato a colonne.
+      await new Promise(r => setTimeout(r, 900));
+      if (!qualcosaMostrato) {
+        try {
+          // Solo per questa sessione: un ripiego automatico non deve cambiare
+          // in modo permanente una scelta che l'utente non ha mai fatto. E'
+          // successo davvero — dopo un guasto il lettore e' rimasto in
+          // scorrimento anche una volta riparato, e sembrava un secondo difetto.
+          vista.renderer.setAttribute('flow', 'scrolled');
+          await vista.init({ showTextStart: true });
+        } catch (e) { /* si prosegue verso la segnalazione */ }
+      }
+
+      await new Promise(r => setTimeout(r, 1600));
+      if (qualcosaMostrato) {
+        raccontaAlServer('recuperato passando allo scorrimento');
+      } else {
+        raccontaAlServer('nessun rendering nemmeno in scorrimento');
+        mostraGuasto('Il libro si è caricato ma non si vede.',
+          'Ho mandato la diagnosi al server. Intanto puoi scaricare il file.');
+      }
+    }
+  } catch (err) {
+    clearInterval(guardiano);
+    console.error(err);
+    raccontaAlServer('eccezione in avvio', err && (err.stack || err.message));
+    mostraGuasto('Non riesco ad aprire il libro.',
+                 (err && err.message) ? err.message : String(err));
+  }
+})();
+</script>
+</body>
+</html>

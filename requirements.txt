@@ -3,9 +3,11 @@ ebooklib
 beautifulsoup4
 lxml
 PyMuPDF
+python-docx
 anthropic
 openai
 python-dotenv
 Werkzeug
 tiktoken
 gunicorn
+pikepdf

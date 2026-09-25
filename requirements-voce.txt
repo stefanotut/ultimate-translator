@@ -1,0 +1,5 @@
+# La voce italiana che gira sul server, senza costi per frase.
+# Su CPU basta la ruota normale di torch: niente CUDA, niente GPU.
+kokoro==0.9.4
+soundfile==0.14.0
+mutagen

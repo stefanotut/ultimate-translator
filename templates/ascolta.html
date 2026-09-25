@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>{{ titolo }}</title>
+<style>
+/* Pagina per ASCOLTARE un libro ancora in traduzione.
+   Non tocca il lettore normale, che non potrebbe nemmeno aprire il libro: il
+   file tradotto non esiste finche' la traduzione non finisce. Qui il testo
+   arriva dal database, frase per frase, man mano che il traduttore avanza. */
+:root{--sf:#faf9f7;--tx:#1a1a1a;--bo:#e0ddd8;--ac:#8b6b3d;--om:#6b6b6b;
+      --ev:color-mix(in srgb,#e8c96a 45%,transparent)}
+@media (prefers-color-scheme:dark){:root{--sf:#16151a;--tx:#eceaea;--bo:#333038;
+      --ac:#c9a56a;--om:#9a9a9a;--ev:color-mix(in srgb,#c9a56a 32%,transparent)}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--sf);color:var(--tx);
+ font:18px/1.7 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Georgia,serif;
+ -webkit-text-size-adjust:100%}
+header{position:sticky;top:0;background:var(--sf);border-bottom:1px solid var(--bo);
+ padding:12px 16px calc(12px + env(safe-area-inset-top)) 16px;z-index:10}
+h1{font-size:1rem;margin:0;font-weight:600;letter-spacing:-.01em;
+ white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stato{font-size:.78rem;color:var(--om);margin-top:3px;font-variant-numeric:tabular-nums}
+main{max-width:680px;margin:0 auto;padding:20px 18px 160px}
+p.f{margin:0 0 .9em;transition:background .2s;border-radius:4px;padding:1px 3px}
+p.f.ora{background:var(--ev)}
+footer{position:fixed;left:0;right:0;bottom:0;background:var(--sf);
+ border-top:1px solid var(--bo);padding:10px 16px calc(10px + env(safe-area-inset-bottom));
+ display:flex;align-items:center;gap:14px;z-index:10}
+button{font:600 1rem/1 inherit;color:var(--tx);background:transparent;
+ border:1.5px solid var(--bo);border-radius:11px;padding:12px 16px;cursor:pointer;
+ -webkit-tap-highlight-color:transparent}
+button.play{font-size:1.4rem;padding:10px 20px;border-color:var(--ac);color:var(--ac)}
+input[type=range]{flex:1;accent-color:var(--ac)}
+.vel{font-size:.85rem;color:var(--om);min-width:3.2em;text-align:right;
+ font-variant-numeric:tabular-nums}
+.spesa{position:fixed;left:12px;bottom:72px;font-size:.72rem;color:var(--om);
+ font-variant-numeric:tabular-nums;pointer-events:none}
+</style>
+</head>
+<body>
+<header>
+  <h1>{{ titolo }}</h1>
+  <div class="stato" id="stato">Carico il testo tradotto…</div>
+</header>
+
+<main id="testo"></main>
+<div class="spesa" id="spesa"></div>
+
+<footer>
+  <button class="play" id="play" title="Ascolta">▶</button>
+  <input type="range" id="velocita" min="0.8" max="3" step="0.1" value="2">
+  <span class="vel" id="velLabel">2,0×</span>
+</footer>
+
+<script>
+const JOB = {{ job_id|tojson }};
+// Il fattore misurato: a 1,25x di sintesi il file contiene 1,171 secondi di
+// contenuto per secondo di audio. Il cursore resta libero perche' la velocita'
+// scelta si ottiene col playbackRate, senza rigenerare NIENTE.
+const FATTORE = 1.171;
+
+let frasi = [], indice = 0, suona = false, audio = null, generazione = 0;
+let traduzioneFinita = false, totaleBlocchi = 0, prontiBlocchi = 0;
+
+const $ = id => document.getElementById(id);
+const velocita = () => parseFloat($('velocita').value);
+
+function disegna() {
+  const m = $('testo');
+  // si aggiunge solo cio' che manca: ridisegnare tutto farebbe saltare la
+  // posizione di scorrimento a ogni aggiornamento
+  for (let i = m.children.length; i < frasi.length; i++) {
+    const p = document.createElement('p');
+    p.className = 'f'; p.id = 'f' + i; p.textContent = frasi[i];
+    p.onclick = () => { indice = i; if (suona) riparti(); };
+    m.appendChild(p);
+  }
+}
+
+function evidenzia() {
+  document.querySelectorAll('p.f.ora').forEach(e => e.classList.remove('ora'));
+  const e = $('f' + indice);
+  if (e) { e.classList.add('ora'); e.scrollIntoView({block: 'center', behavior: 'smooth'}); }
+}
+
+function stato(t) { $('stato').textContent = t; }
+
+async function aggiorna() {
+  try {
+    const r = await fetch(`/api/anteprima/${JOB}?quante=200`);
+    if (!r.ok) { stato('Non riesco a leggere il testo.'); return; }
+    const d = await r.json();
+    traduzioneFinita = d.traduzione_finita;
+    totaleBlocchi = d.blocchi_totali; prontiBlocchi = d.blocchi_pronti;
+    if (d.frasi.length > frasi.length) { frasi = d.frasi; disegna(); }
+    const pct = totaleBlocchi ? Math.round(prontiBlocchi / totaleBlocchi * 100) : 0;
+    stato(traduzioneFinita
+      ? `${frasi.length} frasi · traduzione completa`
+      : `${frasi.length} frasi pronte · tradotto il ${pct}% · continua…`);
+  } catch (e) { /* la rete puo' cadere: si riprova al giro dopo */ }
+}
+
+async function urlFrase(testo) {
+  const r = await fetch('/api/voce', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({testo, voce: 'sara'}),
+  });
+  if (!r.ok) throw new Error('voce non disponibile');
+  return URL.createObjectURL(await r.blob());
+}
+
+function annuncia(da) {
+  // una richiesta sola per le prossime: il server le prepara mentre ascolti
+  const prossime = frasi.slice(da, da + 60);
+  if (prossime.length) {
+    fetch('/api/voce/prepara', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({frasi: prossime, voce: 'sara'}),
+    }).catch(() => {});
+  }
+}
+
+async function ciclo() {
+  const mia = ++generazione;
+  while (suona && mia === generazione) {
+    if (indice >= frasi.length) {
+      if (traduzioneFinita) { fermati('Fine del libro.'); return; }
+      stato('Aspetto la traduzione…');       // il traduttore non e' ancora arrivato qui
+      await new Promise(r => setTimeout(r, 3000));
+      await aggiorna();
+      continue;
+    }
+    evidenzia();
+    let url;
+    try { url = await urlFrase(frasi[indice]); }
+    catch (e) { fermati('Voce non disponibile.'); return; }
+    if (!suona || mia !== generazione) { URL.revokeObjectURL(url); return; }
+    await new Promise(fine => {
+      audio = new Audio(url);
+      audio.preservesPitch = true;
+      audio.playbackRate = velocita() / FATTORE;
+      audio.onended = audio.onerror = () => { URL.revokeObjectURL(url); fine(); };
+      audio.play().catch(() => { URL.revokeObjectURL(url); fine(); });
+    });
+    if (!suona || mia !== generazione) return;
+    indice++;
+    if (indice % 20 === 0) annuncia(indice);
+  }
+}
+
+function riparti() { generazione++; if (audio) { try { audio.pause(); } catch (e) {} } ciclo(); }
+
+function fermati(msg) {
+  suona = false; generazione++;
+  if (audio) { try { audio.pause(); } catch (e) {} }
+  $('play').textContent = '▶';
+  // in pausa la generazione a pagamento si ferma: il precaricamento serve a non
+  // farti aspettare, non a comprarti il libro intero
+  fetch('/api/voce/ferma', {method: 'POST'}).catch(() => {});
+  if (msg) stato(msg);
+}
+
+$('play').onclick = () => {
+  if (suona) { fermati('In pausa.'); return; }
+  suona = true; $('play').textContent = '⏸';
+  annuncia(indice); mostraSpesa(); ciclo();
+};
+
+$('velocita').oninput = () => {
+  $('velLabel').textContent = velocita().toFixed(1).replace('.', ',') + '×';
+  // cambia SUBITO, anche a meta' frase, e non invalida un solo file di cache
+  if (audio) audio.playbackRate = velocita() / FATTORE;
+};
+
+async function mostraSpesa() {
+  try {
+    const d = await (await fetch('/api/spesa')).json();
+    $('spesa').textContent = d.attivo
+      ? `${d.ore_residue} ore residue · ${d.speso.toFixed(3)}$ di ${d.tetto}$` : '';
+  } catch (e) {}
+}
+
+aggiorna().then(() => { mostraSpesa(); });
+setInterval(aggiorna, 10000);      // il testo cresce mentre il traduttore avanza
+setInterval(mostraSpesa, 60000);
+</script>
+</body>
+</html>
