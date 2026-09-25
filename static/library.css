@@ -1814,3 +1814,11 @@ body.is-dragging { user-select: none; -webkit-user-select: none; }
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
+
+/* Warning banner (e.g. the library is on a disk that is wiped at every deploy) */
+.key-banner.is-warning {
+    border-color: rgba(248, 113, 113, 0.35);
+    background: rgba(248, 113, 113, 0.08);
+    color: var(--error-light, #fca5a5);
+}
+.key-banner.is-warning strong { color: var(--error-light, #fca5a5); }

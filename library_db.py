@@ -41,6 +41,7 @@ MAX_TAG_NAME = 40
 MAX_FOLDER_DEPTH = 24
 TRASH_RETENTION_SECONDS = 30 * 24 * 3600
 STALE_TRANSLATION_SECONDS = 30 * 60
+MEMORY_RETENTION_SECONDS = 60 * 24 * 3600
 LOG_TAIL = 200
 
 # Crockford base32: no I, L, O, U -> easy to read and type
@@ -154,6 +155,12 @@ CREATE TABLE IF NOT EXISTS translations (
 );
 CREATE INDEX IF NOT EXISTS idx_translations_book ON translations(book_id);
 CREATE INDEX IF NOT EXISTS idx_translations_library ON translations(library_id, status);
+
+CREATE TABLE IF NOT EXISTS translation_memory (
+    key TEXT PRIMARY KEY,
+    translated TEXT NOT NULL,
+    created_at REAL NOT NULL
+);
 """
 
 
@@ -176,6 +183,14 @@ class NotFound(LibraryError):
         super().__init__(message, 404, 'not_found')
 
 
+class DuplicateInsert(Exception):
+    """create_book found the same file already in the library (checked atomically)."""
+
+    def __init__(self, existing_id):
+        super().__init__('duplicate book')
+        self.existing_id = existing_id
+
+
 # ---------------------------------------------------------------------------
 # Setup & connections
 # ---------------------------------------------------------------------------
@@ -190,6 +205,15 @@ def init(data_dir=None):
 
     _state['data_dir'] = data_dir
     _state['db_path'] = os.path.join(data_dir, 'library.db')
+
+    # Uploads interrupted by a crash leave partial files behind
+    tmp_dir = os.path.join(data_dir, 'tmp')
+    for entry in os.scandir(tmp_dir):
+        try:
+            if entry.is_file() and entry.stat().st_mtime < time.time() - 3600:
+                os.remove(entry.path)
+        except OSError:
+            pass
 
     conn = _connect()
     try:
@@ -315,8 +339,21 @@ def remove_files(paths):
 # Text helpers
 # ---------------------------------------------------------------------------
 
+# Bidirectional overrides/isolates can disguise names (e.g. "gpj.exe" shown as "exe.jpg")
+_BIDI_CONTROLS = frozenset('\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069')
+
+
 def _strip_control(value):
-    return ''.join(c for c in value if unicodedata.category(c)[0] != 'C')
+    """Remove control characters and bidi overrides; keep emoji joiners and characters newer than Python."""
+    return ''.join(
+        c for c in unicodedata.normalize('NFC', value)
+        if c not in _BIDI_CONTROLS and unicodedata.category(c) not in ('Cc', 'Cs')
+    )
+
+
+def name_key(name):
+    """Case-insensitive key of a folder name ('CITTÀ' = 'Città', composed or decomposed accents)."""
+    return unicodedata.normalize('NFC', name).casefold()
 
 
 def clean_name(value, max_len, label='Nome'):
@@ -574,45 +611,61 @@ def ensure_folder_paths(library_id, parent_id, paths):
     Create (or reuse, matching names case-insensitively) the folder hierarchy
     described by relative directory paths such as "Marketing/Social".
     Used when a whole folder is uploaded: uploading the same folder twice
-    merges into the existing one instead of creating a copy.
+    merges into the existing one instead of creating a copy. Paths deeper than
+    the folder depth limit end in the deepest folder allowed.
 
-    Returns ({original_path: folder_id} for every path prefix, [created ids]).
+    Returns ({path: folder_id} for every path received and every prefix of it, [created ids]).
     """
     parent_id = parent_id or None
     requested = []
     for raw in paths or []:
-        raw_parts = [p for p in str(raw).replace('\\', '/').split('/') if p.strip() not in ('', '.', '..')]
+        raw = str(raw)
+        raw_parts = [p for p in raw.replace('\\', '/').split('/') if p.strip() not in ('', '.', '..')]
         if not raw_parts:
             continue
         clean_parts = tuple(clean_name(p, MAX_FOLDER_NAME, 'Nome cartella') for p in raw_parts)
         for i in range(1, len(raw_parts) + 1):
             requested.append(('/'.join(raw_parts[:i]), clean_parts[:i]))
-
-    unique_paths = {parts for _, parts in requested}
-    if len(unique_paths) > 1000:
-        raise LibraryError('Troppe cartelle in un solo caricamento (massimo 1000)')
+        requested.append((raw, clean_parts))
 
     resolved = {}
     created = []
     new_by_parent = defaultdict(list)
+    siblings = {}
     now = time.time()
     with _write() as conn:
         base_depth = 0
         if parent_id:
             _active_folder(conn, library_id, parent_id)
             base_depth = len(_folder_ancestors(conn, parent_id))
+        room = max(1, MAX_FOLDER_DEPTH - base_depth)
+
+        def clamp(parts):
+            return parts[:room]
+
+        unique_paths = {clamp(parts) for _, parts in requested}
+        if len(unique_paths) > 1000:
+            raise LibraryError('Troppe cartelle in un solo caricamento (massimo 1000)')
+
+        def children_of(parent):
+            if parent not in siblings:
+                rows = conn.execute(
+                    'SELECT id, name FROM folders WHERE library_id = ? AND parent_id IS ? AND deleted_at IS NULL '
+                    'ORDER BY position',
+                    (library_id, parent),
+                ).fetchall()
+                found = {}
+                for row in rows:
+                    found.setdefault(name_key(row['name']), row['id'])
+                siblings[parent] = found
+            return siblings[parent]
+
         for parts in sorted(unique_paths, key=len):
-            if base_depth + len(parts) > MAX_FOLDER_DEPTH:
-                raise LibraryError('La cartella ha troppi livelli di sottocartelle')
             parent = resolved[parts[:-1]] if len(parts) > 1 else parent_id
             name = parts[-1]
-            existing = conn.execute(
-                'SELECT id FROM folders WHERE library_id = ? AND parent_id IS ? AND deleted_at IS NULL '
-                'AND name = ? COLLATE NOCASE ORDER BY position LIMIT 1',
-                (library_id, parent, name),
-            ).fetchone()
+            existing = children_of(parent).get(name_key(name))
             if existing:
-                resolved[parts] = existing['id']
+                resolved[parts] = existing
                 continue
             folder_id = uuid.uuid4().hex
             position = _top_positions(conn, 'folders', 'parent_id', library_id, parent, 1)[0]
@@ -621,6 +674,7 @@ def ensure_folder_paths(library_id, parent_id, paths):
                 'VALUES (?, ?, ?, ?, NULL, ?, ?, ?)',
                 (folder_id, library_id, parent, name, position, now, now),
             )
+            children_of(parent)[name_key(name)] = folder_id
             resolved[parts] = folder_id
             created.append(folder_id)
             new_by_parent[parent].append((name, folder_id))
@@ -641,7 +695,7 @@ def ensure_folder_paths(library_id, parent_id, paths):
             for folder_id, position in zip(ids, positions):
                 conn.execute('UPDATE folders SET position = ? WHERE id = ?', (position, folder_id))
 
-    mapping = {raw: resolved[parts] for raw, parts in requested}
+    mapping = {raw: resolved[clamp(parts)] for raw, parts in requested}
     return mapping, created
 
 
@@ -786,13 +840,22 @@ def find_duplicate(library_id, sha256):
     return get_book(library_id, row['id']) if row else None
 
 
-def create_book(library_id, book_id, folder_id=None, **fields):
+def create_book(library_id, book_id, folder_id=None, unique=False, **fields):
+    """Insert a book; with unique=True raise DuplicateInsert if the same file (sha256) is already there."""
     unknown = set(fields) - _BOOK_INSERT_FIELDS
     if unknown:
         raise ValueError(f"Unknown book fields: {unknown}")
     folder_id = folder_id or None
     now = time.time()
     with _write() as conn:
+        if unique and fields.get('sha256'):
+            row = conn.execute(
+                'SELECT id FROM books WHERE library_id = ? AND sha256 = ? AND deleted_at IS NULL '
+                'ORDER BY created_at LIMIT 1',
+                (library_id, fields['sha256']),
+            ).fetchone()
+            if row:
+                raise DuplicateInsert(row['id'])
         if folder_id:
             _active_folder(conn, library_id, folder_id)
         position = _top_positions(conn, 'books', 'folder_id', library_id, folder_id, 1)[0]
@@ -863,21 +926,43 @@ def update_books(library_id, book_ids, **changes):
 
 
 def set_tag_status(book_id, status, error=None):
+    """Returns the new tag_updated_at (the stamp a queued tagging job must match to run)."""
+    now = time.time()
     with _write() as conn:
         conn.execute(
             'UPDATE books SET tag_status = ?, tag_error = ?, tag_updated_at = ? WHERE id = ?',
-            (status, error, time.time(), book_id),
+            (status, error, now, book_id),
         )
+    return now
 
 
-def claim_stale_tagging(library_id, older_than=300):
-    """Books whose tagging never finished (e.g. server restart). Marks them as re-queued."""
+def start_tagging(book_id, stamp):
+    """
+    pending -> running, only if nobody re-queued the book since `stamp` was taken:
+    a job claimed again by another worker (or process) is then run exactly once.
+    """
+    with _write() as conn:
+        updated = conn.execute(
+            "UPDATE books SET tag_status = 'running', tag_updated_at = ? "
+            "WHERE id = ? AND tag_status = 'pending' AND tag_updated_at = ?",
+            (time.time(), book_id, stamp),
+        ).rowcount
+    return updated == 1
+
+
+def claim_stale_tagging(library_id, running_after=600, pending_after=1800):
+    """
+    Books whose tagging never finished (e.g. server restart), as [(book_id, stamp)].
+    A job still waiting in a queue is only reclaimed after a long time, and even then
+    start_tagging() lets just one of the two copies run.
+    """
     now = time.time()
     with _write() as conn:
         rows = conn.execute(
-            "SELECT id FROM books WHERE library_id = ? AND deleted_at IS NULL "
-            "AND tag_status IN ('pending', 'running') AND COALESCE(tag_updated_at, created_at) < ?",
-            (library_id, now - older_than),
+            "SELECT id FROM books WHERE library_id = ? AND deleted_at IS NULL AND ("
+            "(tag_status = 'running' AND COALESCE(tag_updated_at, created_at) < ?) OR "
+            "(tag_status = 'pending' AND COALESCE(tag_updated_at, created_at) < ?))",
+            (library_id, now - running_after, now - pending_after),
         ).fetchall()
         ids = [r['id'] for r in rows]
         for chunk in _chunked(ids):
@@ -885,7 +970,7 @@ def claim_stale_tagging(library_id, older_than=300):
                 f"UPDATE books SET tag_status = 'pending', tag_updated_at = ? WHERE id IN ({_ph(chunk)})",
                 (now, *chunk),
             )
-    return ids
+    return [(book_id, now) for book_id in ids]
 
 
 def activity(library_id):
@@ -1160,9 +1245,12 @@ def update_tag(library_id, tag_id, name=_UNSET, color=_UNSET):
                 (library_id, key, tag_id),
             ).fetchone()
             if other:
+                # A tag the user added by hand stays manual after the merge (retagging keeps it)
                 conn.execute(
-                    'INSERT OR IGNORE INTO book_tags (book_id, tag_id, source, created_at) '
-                    'SELECT book_id, ?, source, created_at FROM book_tags WHERE tag_id = ?',
+                    'INSERT INTO book_tags (book_id, tag_id, source, created_at) '
+                    'SELECT book_id, ?, source, created_at FROM book_tags WHERE tag_id = ? AND true '
+                    "ON CONFLICT(book_id, tag_id) DO UPDATE SET source = 'manual' "
+                    "WHERE excluded.source = 'manual'",
                     (other['id'], tag_id),
                 )
                 conn.execute('DELETE FROM tags WHERE id = ?', (tag_id,))
@@ -1357,22 +1445,26 @@ def list_trash(library_id):
             current = by_id.get(current['parent_id'])
         return names
 
-    def batch_book_count(folder):
-        total, stack = 0, [folder]
+    def subtree_counts(folder):
+        """Books and subfolders a permanent delete of `folder` removes (whatever batch trashed them)."""
+        books_total, folders_total, stack = 0, 0, [folder]
         while stack:
             current = stack.pop()
-            total += sum(1 for b in books_by_folder[current['id']] if b['trash_id'] == folder['trash_id'])
-            stack += [c for c in children[current['id']] if c['trash_id'] == folder['trash_id']]
-        return total
+            books_total += len(books_by_folder[current['id']])
+            deleted_children = [c for c in children[current['id']] if c['deleted_at']]
+            folders_total += len(deleted_children)
+            stack += deleted_children
+        return books_total, folders_total
 
     items = []
     for f in folders:
         if not f['deleted_at'] or is_deleted(f['parent_id']):
             continue
+        book_count, folder_count = subtree_counts(f)
         items.append({
             'kind': 'folder', 'id': f['id'], 'name': f['name'], 'color': f['color'],
             'deleted_at': f['deleted_at'], 'location': location(f['parent_id']),
-            'book_count': batch_book_count(f),
+            'book_count': book_count, 'folder_count': folder_count,
         })
     for b in books:
         if is_deleted(b['folder_id']):
@@ -1420,8 +1512,26 @@ def _purge_books(conn, library_id, book_ids):
     return files
 
 
-def purge_items(library_id, book_ids=(), folder_ids=()):
-    """Permanently delete trashed items and their files."""
+def _translating(conn, book_ids):
+    """Books of `book_ids` with a translation still running."""
+    busy = set()
+    cutoff = time.time() - STALE_TRANSLATION_SECONDS
+    for chunk in _chunked(book_ids):
+        busy.update(
+            r['book_id'] for r in conn.execute(
+                f"SELECT book_id FROM translations WHERE status IN ('pending', 'processing') "
+                f"AND updated_at >= ? AND book_id IN ({_ph(chunk)})",
+                (cutoff, *chunk),
+            )
+        )
+    return busy
+
+
+def purge_items(library_id, book_ids=(), folder_ids=(), skip_busy=False):
+    """
+    Permanently delete trashed items and their files. Books being translated are not
+    deleted: 409, or skipped (with the folders holding them) when skip_busy is set.
+    """
     with _write() as conn:
         folder_set = []
         for folder_id in dict.fromkeys(folder_ids):
@@ -1450,6 +1560,24 @@ def purge_items(library_id, book_ids=(), folder_ids=()):
                 )
             ]
         book_set = list(dict.fromkeys(book_set))
+
+        busy = _translating(conn, book_set)
+        if busy:
+            if not skip_busy:
+                raise LibraryError(
+                    'Uno dei libri e in traduzione: potrai eliminarlo definitivamente quando la traduzione e finita',
+                    409, 'translating',
+                )
+            book_set = [b for b in book_set if b not in busy]
+            busy_folders = set()
+            for chunk in _chunked(list(busy)):
+                for r in conn.execute(f'SELECT folder_id FROM books WHERE id IN ({_ph(chunk)})', chunk):
+                    folder = r['folder_id']
+                    while folder and folder not in busy_folders:
+                        busy_folders.add(folder)
+                        parent = conn.execute('SELECT parent_id FROM folders WHERE id = ?', (folder,)).fetchone()
+                        folder = parent['parent_id'] if parent else None
+            folder_set = [f for f in folder_set if f not in busy_folders]
 
         files = _purge_books(conn, library_id, book_set)
         for chunk in _chunked(folder_set):
@@ -1490,7 +1618,7 @@ def purge_expired(library_id, retention=TRASH_RETENTION_SECONDS):
             )
         ]
     if folder_ids or book_ids:
-        return purge_items(library_id, book_ids, folder_ids)
+        return purge_items(library_id, book_ids, folder_ids, skip_busy=True)
     return {'books': 0, 'folders': 0}
 
 
@@ -1571,6 +1699,33 @@ def delete_translation(library_id, translation_id):
             raise LibraryError('La traduzione è ancora in corso', 409, 'running')
         conn.execute('DELETE FROM translations WHERE id = ?', (translation_id,))
     remove_files([row['output_path']])
+
+
+class TranslationMemory:
+    """
+    Passages already translated (keyed by translator.TranslationSession), shared by all
+    workers: a job retried after an error or a restart does not pay for them again.
+    """
+
+    def get(self, key):
+        with _read() as conn:
+            row = conn.execute('SELECT translated FROM translation_memory WHERE key = ?', (key,)).fetchone()
+        return row['translated'] if row else None
+
+    def put(self, key, translated):
+        with _write() as conn:
+            conn.execute(
+                'INSERT OR REPLACE INTO translation_memory (key, translated, created_at) VALUES (?, ?, ?)',
+                (key, translated, time.time()),
+            )
+
+
+def purge_translation_memory(retention=MEMORY_RETENTION_SECONDS):
+    with _write() as conn:
+        deleted = conn.execute(
+            'DELETE FROM translation_memory WHERE created_at < ?', (time.time() - retention,)
+        ).rowcount
+    return deleted
 
 
 def fail_stale_translations(max_idle=STALE_TRANSLATION_SECONDS):

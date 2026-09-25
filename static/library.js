@@ -210,7 +210,7 @@ async function copyText(text) {
 // ---------------------------------------------------------------------------
 // API
 // ---------------------------------------------------------------------------
-async function api(method, url, body) {
+async function api(method, url, body, retried) {
     const options = { method, headers: {}, credentials: 'same-origin' };
     if (body !== undefined) {
         options.headers['Content-Type'] = 'application/json';
@@ -220,12 +220,34 @@ async function api(method, url, body) {
     let data = null;
     try { data = await response.json(); } catch (_) { data = null; }
     if (!response.ok) {
+        if (response.status === 401 && data && data.code === 'no_library' && !retried) {
+            await recoverLibrary();
+            return api(method, url, body, true);
+        }
         const error = new Error((data && data.error) || `Errore del server (${response.status})`);
         error.status = response.status;
         error.data = data;
         throw error;
     }
     return data;
+}
+
+// The cookie points to a library that no longer exists (code changed on another device,
+// data wiped): reload the library once for all the requests that noticed it, then retry them.
+let recovering = null;
+function recoverLibrary() {
+    if (!recovering) {
+        recovering = (async () => {
+            try {
+                setData(await api('GET', '/api/library', undefined, true));
+                render();
+                toast('Questa pagina era collegata a una libreria non più disponibile: ora usa la libreria di questo browser. Se hai cambiato codice su un altro dispositivo, riaprila da «Codice libreria».', { type: 'error', duration: 12000 });
+            } finally {
+                setTimeout(() => { recovering = null; }, 3000);
+            }
+        })();
+    }
+    return recovering;
 }
 
 // ---------------------------------------------------------------------------
@@ -291,6 +313,7 @@ function setData(data) {
     state.tags = data.tags || [];
     state.trashCount = data.trash_count || 0;
     state.ai = data.ai || null;
+    state.storageWarning = data.storage_warning || null;
     state.loaded = true;
     reindex();
 }
@@ -945,6 +968,21 @@ function renderChips() {
 // ---------------------------------------------------------------------------
 // Content
 // ---------------------------------------------------------------------------
+function folderContentPhrase(item) {
+    // ", la sua sottocartella e i suoi 3 libri" / " e il suo libro" / " e tutto il suo contenuto"
+    if (!item) return ' e tutto il suo contenuto';
+    const folders = item.folder_count === 1 ? 'la sua sottocartella' : item.folder_count > 1 ? `le sue ${formatNumber(item.folder_count)} sottocartelle` : '';
+    const books = item.book_count === 1 ? 'il suo libro' : item.book_count > 1 ? `i suoi ${formatNumber(item.book_count)} libri` : '';
+    if (folders && books) return `, ${folders} e ${books}`;
+    if (folders || books) return ` e ${folders || books}`;
+    return '';
+}
+
+function storageBannerHTML() {
+    if (!state.storageWarning) return '';
+    return `<div class="key-banner is-warning" role="alert">${icon('alert', 20)}<p><strong>Attenzione:</strong> ${esc(state.storageWarning)}</p></div>`;
+}
+
 function keyBannerHTML() {
     if (state.books.length < 3 || store.get('keySeen', false) || store.get('keyBannerDismissed', false)) return '';
     return `<div class="key-banner">${icon('key', 20)}
@@ -965,7 +1003,7 @@ function renderContent() {
         return;
     }
     const view = computeView();
-    let html = keyBannerHTML();
+    let html = storageBannerHTML() + keyBannerHTML();
     if (view.filtering) {
         const where = state.view.type === 'folder'
             ? (state.view.id ? `in «${esc(state.folderById.get(state.view.id).name)}» e sottocartelle` : 'in tutta la libreria')
@@ -1017,7 +1055,9 @@ function renderTrash() {
             ? `<div class="trash-thumb is-folder" style="--item-color:${colorHex(item.color) || DEFAULT_FOLDER_COLOR}">${FOLDER_GLYPH}</div>`
             : `<div class="trash-thumb">${coverHTML({ cover_url: item.cover_url, title: item.name, author: item.author }, true)}</div>`;
         const where = item.location.length ? item.location.join(' › ') : 'Cartelle';
-        const detail = item.kind === 'folder' ? ` · ${plural(item.book_count, 'libro', 'libri')}` : ` · ${esc(item.file_type.toUpperCase())}`;
+        const detail = item.kind === 'folder'
+            ? ` · ${plural(item.book_count, 'libro', 'libri')}${item.folder_count ? ` · ${plural(item.folder_count, 'sottocartella', 'sottocartelle')}` : ''}`
+            : ` · ${esc(item.file_type.toUpperCase())}`;
         return `<div class="trash-row">
             ${thumb}
             <div class="trash-main">
@@ -1137,6 +1177,7 @@ function toast(message, options = {}) {
         });
     }
     while (el.toasts.children.length > 3) el.toasts.firstElementChild.remove();
+    return () => { clearTimeout(timer); remove(); };
 }
 
 async function run(task) {
@@ -2338,10 +2379,10 @@ function pickFolder(folderId) {
     el.folderInput.click();
 }
 
-async function enqueueUploads(entries, targetFolderId) {
+async function enqueueUploads(entries, targetFolderId, reading = {}) {
     targetFolderId = targetFolderId || null;
     const accepted = [];
-    let skipped = 0;
+    let skipped = reading.skipped || 0;
     for (const entry of entries) {
         const parts = entry.relPath.split('/');
         if (parts.some(part => part.startsWith('.'))) continue;
@@ -2349,8 +2390,10 @@ async function enqueueUploads(entries, targetFolderId) {
         if (ext === 'epub' || ext === 'pdf') accepted.push(entry);
         else skipped++;
     }
+    const unreadable = reading.unreadable || [];
     if (!accepted.length) {
-        toast(skipped ? `Nessun file EPUB o PDF da caricare (${plural(skipped, 'file ignorato', 'file ignorati')})` : 'Nessun file da caricare', { type: 'error' });
+        const why = unreadable.length ? `${plural(unreadable.length, 'elemento non leggibile', 'elementi non leggibili')}` : (skipped ? plural(skipped, 'file ignorato', 'file ignorati') : '');
+        toast(why ? `Nessun file EPUB o PDF da caricare (${why})` : 'Nessun file da caricare', { type: 'error' });
         return;
     }
 
@@ -2362,13 +2405,17 @@ async function enqueueUploads(entries, targetFolderId) {
     let folderMap = {};
     let created = [];
     if (dirs.size) {
-        const data = await run(() => api('POST', '/api/library/folders/tree', { parent_id: targetFolderId, paths: [...dirs] }));
-        if (!data) return;
-        folderMap = data.folders;
-        created = data.created;
+        // Big trees (a Calibre library has a folder per book) go in several requests
+        const paths = [...dirs].sort();
+        for (let i = 0; i < paths.length; i += 400) {
+            const data = await run(() => api('POST', '/api/library/folders/tree', { parent_id: targetFolderId, paths: paths.slice(i, i + 400) }));
+            if (!data) return;
+            Object.assign(folderMap, data.folders);
+            created = created.concat(data.created);
+        }
         if (targetFolderId) state.expanded.add(targetFolderId);
         saveExpanded();
-        await refresh();
+        try { await refresh(); } catch (error) { console.error(error); }
     }
 
     const topDirs = [...new Set(accepted.map(e => e.relPath.split('/').slice(0, -1)[0]).filter(Boolean))];
@@ -2393,7 +2440,10 @@ async function enqueueUploads(entries, targetFolderId) {
         }
         state.uploads.push(item);
     }
-    state.uploadNote = skipped ? `${plural(skipped, 'file ignorato', 'file ignorati')}: si possono caricare solo EPUB e PDF` : '';
+    state.uploadNote = [
+        skipped ? `${plural(skipped, 'file ignorato', 'file ignorati')}: si possono caricare solo EPUB e PDF` : '',
+        unreadable.length ? `Non leggibili: ${unreadable.slice(0, 5).join(', ')}${unreadable.length > 5 ? '…' : ''}` : '',
+    ].filter(Boolean).join(' · ');
     uploadCollapsed = false;
     renderUploadPanel();
     pumpUploads();
@@ -2409,7 +2459,7 @@ function pumpUploads() {
         }
     }
     renderUploadPanel();
-    if (!state.uploads.some(u => u.status === 'queued' || u.status === 'uploading')) onUploadsIdle();
+    if (!state.uploads.some(u => u.status === 'queued' || u.status === 'uploading' || u.status === 'waiting')) onUploadsIdle();
 }
 
 function startUpload(upload) {
@@ -2435,6 +2485,16 @@ function startUpload(upload) {
         } else if (xhr.status === 409 && data.code === 'duplicate') {
             upload.status = 'duplicate';
             upload.existing = data.existing;
+        } else if (xhr.status === 401 && data.code === 'no_library' && !upload.recovered) {
+            upload.recovered = true;
+            upload.status = 'waiting';
+            recoverLibrary()
+                .catch(error => console.error(error))
+                .then(() => {
+                    upload.status = 'queued';
+                    pumpUploads();
+                });
+            return;
         } else {
             upload.status = 'error';
             upload.message = data.error || (xhr.status === 413 ? 'File troppo grande (massimo 100 MB)' : `Errore del server (${xhr.status})`);
@@ -2493,16 +2553,19 @@ function scheduleUploadRender() {
     });
 }
 
+let lastUploadSignature = '';
+
 function renderUploadPanel() {
     const uploads = state.uploads;
     el.uploadPanel.classList.toggle('is-visible', uploads.length > 0);
     el.uploadPanel.classList.toggle('is-collapsed', uploadCollapsed);
     if (!uploads.length) {
         el.uploadPanel.innerHTML = '';
+        lastUploadSignature = '';
         return;
     }
-    const active = uploads.some(u => u.status === 'queued' || u.status === 'uploading');
-    const finished = uploads.filter(u => u.status !== 'queued' && u.status !== 'uploading').length;
+    const active = uploads.some(u => u.status === 'queued' || u.status === 'uploading' || u.status === 'waiting');
+    const finished = uploads.filter(u => u.status !== 'queued' && u.status !== 'uploading' && u.status !== 'waiting').length;
     const done = uploads.filter(u => u.status === 'done').length;
     const duplicates = uploads.filter(u => u.status === 'duplicate').length;
     const errors = uploads.filter(u => u.status === 'error').length;
@@ -2519,9 +2582,11 @@ function renderUploadPanel() {
     const itemHTML = (u) => {
         let stateHTML = '';
         let message = '';
-        if (u.status === 'uploading' || u.status === 'queued') {
-            stateHTML = u.status === 'uploading' ? icon('spinner', 16) : '';
-            message = u.status === 'queued' ? '<div class="msg">In coda</div>' : `<div class="bar"><span style="width:${Math.round(u.progress * 100)}%"></span></div>`;
+        if (u.status === 'uploading' || u.status === 'queued' || u.status === 'waiting') {
+            stateHTML = u.status === 'queued' ? '' : icon('spinner', 16);
+            message = u.status === 'queued' ? '<div class="msg">In coda</div>'
+                : u.status === 'waiting' ? '<div class="msg">Riapertura della libreria...</div>'
+                : `<div class="bar"><span style="width:${Math.round(u.progress * 100)}%"></span></div>`;
         } else if (u.status === 'done') {
             const book = state.bookById.get(u.bookId);
             stateHTML = `<span class="state ok">${icon('checkCircle', 18)}</span>`;
@@ -2533,14 +2598,39 @@ function renderUploadPanel() {
             stateHTML = `<span class="state error">${icon('alert', 18)}</span>`;
             message = `<div class="msg error">${esc(u.message || 'Errore')}${u.retryable ? ` · <button class="link-btn" data-action="upload-retry" data-uid="${u.uid}">Riprova</button>` : ''}</div>`;
         }
-        return `<div class="upload-item">
+        return `<div class="upload-item" data-uid="${u.uid}">
             <span class="kind ${u.name.toLowerCase().endsWith('.pdf') ? 'pdf' : ''}">${u.name.toLowerCase().endsWith('.pdf') ? 'PDF' : 'EPUB'}</span>
             <div class="main"><div class="name" title="${esc(u.name)}">${esc(u.name)}</div>${u.dir ? `<div class="path">${icon('folderFill', 11)}<span>${esc(u.dir.replace(/\//g, ' › '))}</span></div>` : ''}${message}</div>
             ${stateHTML}
         </div>`;
     };
 
-    const shown = uploads.slice(-250).reverse();
+    // Problems first (they need an action), then what is moving, then the rest
+    const newestFirst = (list) => list.slice().reverse();
+    const shown = [
+        ...newestFirst(uploads.filter(u => u.status === 'error')),
+        ...newestFirst(uploads.filter(u => u.status === 'duplicate')),
+        ...uploads.filter(u => u.status === 'uploading' || u.status === 'waiting'),
+        ...uploads.filter(u => u.status === 'queued'),
+        ...newestFirst(uploads.filter(u => u.status === 'done')),
+    ].slice(0, 250);
+    const signature = [uploadCollapsed, active, state.uploadNote, ...shown.map(u => {
+        const book = u.status === 'done' ? state.bookById.get(u.bookId) : null;
+        return `${u.uid}:${u.status}:${book && isTagging(book) ? 't' : ''}:${u.message || ''}`;
+    })].join('|');
+    if (signature === lastUploadSignature && el.uploadPanel.firstElementChild) {
+        // Only numbers changed: update them in place
+        el.uploadPanel.querySelector('.upload-title').textContent = title;
+        el.uploadPanel.querySelector('.upload-sub').textContent = sub;
+        el.uploadPanel.querySelector('.upload-ring .fg').setAttribute('stroke-dashoffset', String(circumference * (1 - (active ? ratio : 1))));
+        for (const u of shown) {
+            if (u.status !== 'uploading') continue;
+            const bar = el.uploadPanel.querySelector(`.upload-item[data-uid="${u.uid}"] .bar span`);
+            if (bar) bar.style.width = `${Math.round(u.progress * 100)}%`;
+        }
+        return;
+    }
+    lastUploadSignature = signature;
     el.uploadPanel.innerHTML = `
         <div class="upload-head">
             <svg class="upload-ring${active ? '' : ' is-done'}" viewBox="0 0 34 34" aria-hidden="true">
@@ -2558,33 +2648,57 @@ function renderUploadPanel() {
 function findUpload(uid) { return state.uploads.find(u => String(u.uid) === String(uid)); }
 
 // Folder traversal for drag & drop from the computer
-function collectDropped(dataTransfer) {
+const BOOK_FILE_RE = /\.(epub|pdf)$/i;
+
+async function collectDropped(dataTransfer) {
     const items = Array.from(dataTransfer.items || []).filter(item => item.kind === 'file');
     const entries = items.map(item => (item.webkitGetAsEntry ? item.webkitGetAsEntry() : null));
-    if (entries.length && entries.every(Boolean)) {
-        return Promise.all(entries.map(entry => readEntry(entry, ''))).then(lists => lists.flat());
+    const reading = { entries: [], skipped: 0, unreadable: [] };
+    if (!(entries.length && entries.every(Boolean))) {
+        reading.entries = Array.from(dataTransfer.files || []).map(file => ({ file, relPath: file.name }));
+        return reading;
     }
-    return Promise.resolve(Array.from(dataTransfer.files || []).map(file => ({ file, relPath: file.name })));
+    // Big folders take a while to read: say so
+    let closeNotice = null;
+    const noticeTimer = setTimeout(() => { closeNotice = toast('Lettura della cartella...', { duration: 60000 }); }, 400);
+    try {
+        for (const entry of entries) await readEntry(entry, '', reading);
+    } finally {
+        clearTimeout(noticeTimer);
+        if (closeNotice) closeNotice();
+    }
+    return reading;
 }
 
-async function readEntry(entry, prefix) {
+async function readEntry(entry, prefix, reading) {
+    if (entry.name.startsWith('.') || entry.name === '__MACOSX') return;
     if (entry.isFile) {
-        const file = await new Promise((resolve, reject) => entry.file(resolve, reject));
-        return [{ file, relPath: prefix + file.name }];
+        if (!BOOK_FILE_RE.test(entry.name)) {
+            reading.skipped++;
+            return;
+        }
+        try {
+            const file = await new Promise((resolve, reject) => entry.file(resolve, reject));
+            reading.entries.push({ file, relPath: prefix + file.name });
+        } catch (error) {
+            reading.unreadable.push(prefix + entry.name);
+        }
+        return;
     }
     if (entry.isDirectory) {
-        const reader = entry.createReader();
         const children = [];
-        for (;;) {
-            const batch = await new Promise((resolve, reject) => reader.readEntries(resolve, reject));
-            if (!batch.length) break;
-            children.push(...batch);
+        try {
+            const reader = entry.createReader();
+            for (;;) {
+                const batch = await new Promise((resolve, reject) => reader.readEntries(resolve, reject));
+                if (!batch.length) break;
+                children.push(...batch);
+            }
+        } catch (error) {
+            reading.unreadable.push(`${prefix}${entry.name}/`);
         }
-        const files = [];
-        for (const child of children) files.push(...await readEntry(child, `${prefix}${entry.name}/`));
-        return files;
+        for (const child of children) await readEntry(child, `${prefix}${entry.name}/`, reading);
     }
-    return [];
 }
 
 // ---------------------------------------------------------------------------
@@ -2947,8 +3061,11 @@ window.addEventListener('drop', (event) => {
     const target = fileDropFolder(event.target);
     endFileDrag();
     collectDropped(event.dataTransfer)
-        .then(entries => enqueueUploads(entries, target))
-        .catch(() => toast('Impossibile leggere i file trascinati', { type: 'error' }));
+        .then(reading => enqueueUploads(reading.entries, target, reading))
+        .catch((error) => {
+            console.error(error);
+            toast('Impossibile leggere i file trascinati', { type: 'error' });
+        });
 });
 
 // ---------------------------------------------------------------------------
@@ -3106,7 +3223,9 @@ async function handleAction(action, node) {
             const confirmed = await confirmDialog({
                 title: 'Eliminare definitivamente?',
                 message: kind === 'folder'
-                    ? `La cartella «${item ? item.name : ''}» e i suoi ${plural(item ? item.book_count : 0, 'libro', 'libri')} verranno eliminati per sempre, insieme alle traduzioni.`
+                    ? (folderContentPhrase(item)
+                        ? `La cartella «${item ? item.name : ''}»${folderContentPhrase(item)} verranno eliminati per sempre, insieme alle traduzioni.`
+                        : `La cartella «${item.name}» verrà eliminata per sempre.`)
                     : `«${item ? item.name : ''}» e le sue traduzioni verranno eliminati per sempre.`,
                 confirm: 'Elimina per sempre',
                 danger: true,
@@ -3325,14 +3444,27 @@ el.search.addEventListener('input', () => {
     }, 110);
 });
 
+function uploadFailed(error) {
+    console.error(error);
+    toast(error.message || 'Caricamento non riuscito', { type: 'error' });
+}
+
 el.fileInput.addEventListener('change', () => {
     const files = Array.from(el.fileInput.files || []);
-    if (files.length) enqueueUploads(files.map(file => ({ file, relPath: file.name })), uploadTarget);
+    if (files.length) enqueueUploads(files.map(file => ({ file, relPath: file.name })), uploadTarget).catch(uploadFailed);
 });
 
 el.folderInput.addEventListener('change', () => {
     const files = Array.from(el.folderInput.files || []);
-    if (files.length) enqueueUploads(files.map(file => ({ file, relPath: file.webkitRelativePath || file.name })), uploadTarget);
+    if (files.length) enqueueUploads(files.map(file => ({ file, relPath: file.webkitRelativePath || file.name })), uploadTarget).catch(uploadFailed);
+});
+
+// Leaving the page (a link, "Traduci", closing the tab) would drop the uploads still queued
+window.addEventListener('beforeunload', (event) => {
+    if (state.uploads.some(u => u.status === 'queued' || u.status === 'uploading' || u.status === 'waiting')) {
+        event.preventDefault();
+        event.returnValue = '';
+    }
 });
 
 el.content.addEventListener('error', (event) => {

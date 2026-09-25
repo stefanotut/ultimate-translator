@@ -7,13 +7,17 @@ table of contents, a text sample for automatic tagging and a cover thumbnail.
 
 import os
 import re
+import zipfile
 import html
 import logging
 import posixpath
 import warnings
 from urllib.parse import unquote
 
-import fitz  # PyMuPDF
+try:
+    import pymupdf as fitz  # PyMuPDF >= 1.24.3
+except ImportError:  # older PyMuPDF releases only have the fitz name
+    import fitz
 import ebooklib
 from ebooklib import epub
 from bs4 import BeautifulSoup
@@ -49,6 +53,23 @@ _FILE_EXT_RE = re.compile(r'\.(docx?|pdf|indd|qxp|qxd|rtf|odt|txt|pages|epub|x?h
 
 class BookReadError(Exception):
     """The file cannot be opened as a book (corrupt, protected, empty)."""
+
+
+# An EPUB is a zip: refuse the ones that expand to absurd sizes (zip bombs) before reading them
+MAX_EPUB_UNCOMPRESSED = 300 * 1024 * 1024
+MAX_EPUB_ENTRY = 64 * 1024 * 1024
+MAX_EPUB_ENTRIES = 20000
+
+
+def check_epub_archive(path):
+    try:
+        with zipfile.ZipFile(path) as archive:
+            infos = archive.infolist()
+    except (zipfile.BadZipFile, OSError) as e:
+        raise BookReadError('Il file EPUB è danneggiato') from e
+    if (len(infos) > MAX_EPUB_ENTRIES or any(i.file_size > MAX_EPUB_ENTRY for i in infos)
+            or sum(i.file_size for i in infos) > MAX_EPUB_UNCOMPRESSED):
+        raise BookReadError("L'EPUB è troppo grande una volta decompresso")
 
 
 # ---------------------------------------------------------------------------
@@ -244,6 +265,7 @@ def _epub_cover(book, documents):
 
 
 def _extract_epub(path, include_cover):
+    check_epub_archive(path)
     book = epub.read_epub(path, options={'ignore_ncx': True})
     documents = list(book.get_items_of_type(ebooklib.ITEM_DOCUMENT))
 
@@ -305,6 +327,9 @@ def _extract_epub(path, include_cover):
 def _extract_pdf(path, include_cover):
     doc = fitz.open(path)
     try:
+        if not doc.is_pdf:
+            # PyMuPDF also opens images, HTML, XPS... saved with a .pdf name
+            raise BookReadError('Il file non è un PDF valido')
         if doc.needs_pass and not doc.authenticate(''):
             raise BookReadError('Il PDF è protetto da password')
         if doc.page_count == 0:

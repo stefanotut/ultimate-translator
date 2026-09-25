@@ -12,6 +12,7 @@ sys.path.insert(0, TESTS_DIR)
 # Never call real AI APIs from tests (load_dotenv does not override these)
 os.environ['OPENAI_API_KEY'] = ''
 os.environ['ANTHROPIC_API_KEY'] = ''
+os.environ['MODEL_CHECK'] = '0'  # never ask the providers which models a key can use
 os.environ.setdefault('LIBRARY_DATA_DIR', tempfile.mkdtemp(prefix='ut-library-'))
 
 from samples import make_epub, make_pdf  # noqa: E402
@@ -31,15 +32,22 @@ def app(tmp_path):
     return flask_app
 
 
+def browser(app):
+    """A browser that opened the library page (which creates its library)."""
+    test_client = app.test_client()
+    assert test_client.get('/api/library').status_code == 200
+    return test_client
+
+
 @pytest.fixture
 def client(app):
-    return app.test_client()
+    return browser(app)
 
 
 @pytest.fixture
 def other_client(app):
     """A second browser, with its own cookie jar (and therefore its own library)."""
-    return app.test_client()
+    return browser(app)
 
 
 @pytest.fixture

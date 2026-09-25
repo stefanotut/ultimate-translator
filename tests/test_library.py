@@ -26,7 +26,8 @@ def tag_names(data, book):
 # Private libraries
 # ---------------------------------------------------------------------------
 
-def test_each_browser_gets_a_private_library_cookie(client):
+def test_each_browser_gets_a_private_library_cookie(app):
+    client = app.test_client()
     response = client.get('/api/library')
     cookie = response.headers.get('Set-Cookie', '')
     assert response.status_code == 200
@@ -555,3 +556,144 @@ def test_ai_tagging_can_be_disabled(monkeypatch):
     monkeypatch.setenv('ANTHROPIC_API_KEY', 'sk-ant-test-key')
     monkeypatch.setenv('LIBRARY_AI_TAGS', '0')
     assert tagger.ai_status()['enabled'] is False
+
+
+# ---------------------------------------------------------------------------
+# Robustness (independent audit)
+# ---------------------------------------------------------------------------
+
+def test_changes_never_create_a_library_silently(app, pdf_file):
+    stranger = app.test_client()
+    stranger.set_cookie('ut_library', 'ABCDEFGHJKMNPQRSTVWX')  # code rotated elsewhere / data wiped
+    for _ in range(3):
+        response = upload(stranger, pdf_file)
+        assert response.status_code == 401 and response.get_json()['code'] == 'no_library'
+    assert stranger.post('/api/library/folders', json={'name': 'X'}).status_code == 401
+    # Opening the library page gives the browser a library again, then writes work
+    assert stranger.get('/api/library').status_code == 200
+    assert upload(stranger, pdf_file).status_code == 201
+
+
+def library_id_of(client):
+    code = client.get('/api/library/key').get_json()['code']
+    return library_db.get_library_by_code(library_db.normalize_code(code))['id']
+
+
+def test_a_book_is_tagged_once_even_if_its_job_is_claimed_again(client, pdf_file, monkeypatch):
+    import library
+
+    calls = []
+    real_suggest = tagger.suggest
+    monkeypatch.setattr(tagger, 'suggest', lambda context, vocabulary: calls.append(1) or real_suggest(context, vocabulary))
+
+    queued = []
+
+    class Queue:
+        def submit(self, fn, *args):
+            queued.append((fn, args))
+
+    monkeypatch.setattr(library, 'TAGGING_INLINE', False)
+    monkeypatch.setattr(library, '_get_executor', lambda: Queue())
+    book = upload(client, pdf_file).get_json()['book']
+    assert len(queued) == 1
+
+    # The job waits in the queue for a long time, so maintenance claims it again
+    with library_db._write() as conn:
+        conn.execute('UPDATE books SET tag_updated_at = tag_updated_at - 4000 WHERE id = ?', (book['id'],))
+    claimed = library_db.claim_stale_tagging(library_id_of(client))
+    assert [book_id for book_id, _ in claimed] == [book['id']]
+    library.schedule_tagging(library_id_of(client), book['id'], stamp=claimed[0][1])
+
+    for fn, args in queued:  # the original job, then the claimed copy
+        fn(*args)
+    assert len(calls) == 1
+    assert state(client)['books'][0]['tag_status'] == 'done'
+
+
+def test_same_file_uploaded_twice_at_once_is_stored_once(client, pdf_file):
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        statuses = list(pool.map(lambda _: upload(client, pdf_file).status_code, range(4)))
+    assert sorted(statuses) == [201, 409, 409, 409]
+    assert len(state(client)['books']) == 1
+
+
+def test_merging_tags_keeps_manual_tags_manual(client, pdf_file):
+    book = upload(client, pdf_file).get_json()['book']
+    client.post('/api/library/books/tags', json={'book_ids': [book['id']], 'add': ['fragranze']})
+    data = state(client)
+    manual = next(t for t in data['tags'] if t['name'] == 'fragranze')
+    auto = next(t for t in data['tags'] if t['name'] != 'fragranze')
+    assert client.patch(f"/api/library/tags/{manual['id']}", json={'name': auto['name']}).status_code == 200
+    # Regenerating the automatic tags keeps the tag the user added by hand
+    client.post(f"/api/library/books/{book['id']}/retag")
+    data = state(client)
+    assert auto['name'] in tag_names(data, data['books'][0])
+
+
+def test_folder_uploads_merge_unicode_names_and_clamp_deep_paths(client):
+    first = client.post('/api/library/folders/tree', json={'paths': ['Città/Vendite']}).get_json()
+    decomposed = 'Citta\u0300'  # the same name as a Mac file system may spell it
+    second = client.post('/api/library/folders/tree', json={'paths': [f'{decomposed.upper()}/vendite']}).get_json()
+    assert second['created'] == []
+    assert second['folders'][f'{decomposed.upper()}/vendite'] == first['folders']['Città/Vendite']
+
+    deep = '/'.join(f'L{i}' for i in range(40))
+    response = client.post('/api/library/folders/tree', json={'paths': [deep, 'A\\B', 'Emoji 🫨/👨‍💻']})
+    assert response.status_code == 200
+    mapping = response.get_json()['folders']
+    assert deep in mapping and 'A\\B' in mapping
+    names = {f['name'] for f in state(client)['folders']}
+    assert {'Emoji 🫨', '👨‍💻', 'A', 'B'} <= names
+
+
+def test_permanent_delete_counts_everything_it_removes(client, pdf_file, epub_file):
+    parent = create_folder(client, 'Progetti')
+    child = create_folder(client, 'Archivio', parent['id'])
+    upload(client, pdf_file, folder_id=child['id'])
+    upload(client, epub_file, folder_id=parent['id'])
+    client.post('/api/library/trash', json={'folder_ids': [child['id']]})
+    client.post('/api/library/trash', json={'folder_ids': [parent['id']]})
+    items = client.get('/api/library/trash').get_json()['items']
+    assert [(i['name'], i['book_count'], i['folder_count']) for i in items] == [('Progetti', 2, 1)]
+    result = client.post('/api/library/trash/purge', json={'folder_ids': [parent['id']]}).get_json()
+    assert result == {'books': 2, 'folders': 2}
+
+
+def test_a_book_being_translated_cannot_be_deleted_for_good(client, pdf_file):
+    book = upload(client, pdf_file).get_json()['book']
+    library = {'id': library_id_of(client)}
+    library_db.create_translation('t-running-0000000000000000000000', library_id=library['id'], book_id=book['id'],
+                                  source_lang='Italian', target_lang='English', file_type='pdf')
+    library_db.update_translation('t-running-0000000000000000000000', status='processing')
+    client.post('/api/library/trash', json={'book_ids': [book['id']]})
+    response = client.post('/api/library/trash/purge', json={'book_ids': [book['id']]})
+    assert response.status_code == 409 and response.get_json()['code'] == 'translating'
+    assert library_db.purge_expired(library['id'], retention=-1) == {'books': 0, 'folders': 0}
+
+
+def test_files_that_are_not_really_pdfs_are_refused(client, tmp_path):
+    png = tmp_path / 'scan.pdf'
+    import samples
+    png.write_bytes(samples._cover_png())
+    html = tmp_path / 'page.pdf'
+    html.write_text('<html><body><h1>Download failed</h1></body></html>')
+    for path in (png, html):
+        response = upload(client, str(path))
+        # Newer PyMuPDF opens the HTML and says it is not a PDF, older ones fail to open it
+        assert response.status_code == 400
+        assert any(word in response.get_json()['error'] for word in ('PDF valido', 'danneggiato'))
+    assert state(client)['books'] == []
+
+
+def test_zip_bomb_epubs_are_refused(client, tmp_path):
+    import zipfile
+
+    bomb = tmp_path / 'bomb.epub'
+    with zipfile.ZipFile(bomb, 'w', zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr('mimetype', 'application/epub+zip')
+        archive.writestr('OEBPS/big.xhtml', b'\0' * (70 * 1024 * 1024))
+    assert os.path.getsize(bomb) < 1024 * 1024
+    response = upload(client, str(bomb))
+    assert response.status_code == 400 and 'troppo grande' in response.get_json()['error']

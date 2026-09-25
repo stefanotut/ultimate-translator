@@ -78,6 +78,19 @@ def current_library_id(create=True):
     return library['id'] if library else None
 
 
+def writable_library_id():
+    """
+    The library a change applies to. Changes never create a library: with an unknown
+    cookie (code changed on another device, data wiped) parallel uploads would otherwise
+    scatter books into throwaway libraries. The page reloads its library and retries.
+    """
+    library = current_library(create=False)
+    if not library:
+        raise LibraryError('La libreria di questo browser non e piu disponibile: ricarica la pagina',
+                           401, 'no_library')
+    return library['id']
+
+
 def _is_https():
     forwarded = request.headers.get('X-Forwarded-Proto', '').split(',')[0].strip()
     return request.is_secure or forwarded == 'https'
@@ -250,23 +263,31 @@ def import_book(library_id, file_storage, folder_id=None, allow_duplicate=False,
                 fh.write(info['cover'])
             has_cover = True
 
-        book = library_db.create_book(
-            library_id, book_id, folder_id,
-            title=(info.get('title') or title_from_filename(filename))[:library_db.MAX_TITLE],
-            author=info.get('author'),
-            original_filename=filename[:255],
-            file_type=ext,
-            file_size=size,
-            file_path=final_rel,
-            sha256=sha256,
-            language=tagger.detect_language_offline(info.get('text_sample'), info.get('language_code')),
-            num_pages=info.get('num_pages'),
-            num_chapters=info.get('num_chapters'),
-            total_words=info.get('total_words'),
-            total_chars=info.get('total_chars'),
-            estimated_tokens=info.get('estimated_tokens'),
-            has_cover=1 if has_cover else 0,
-        )
+        try:
+            book = library_db.create_book(
+                library_id, book_id, folder_id, unique=not allow_duplicate,
+                title=(info.get('title') or title_from_filename(filename))[:library_db.MAX_TITLE],
+                author=info.get('author'),
+                original_filename=filename[:255],
+                file_type=ext,
+                file_size=size,
+                file_path=final_rel,
+                sha256=sha256,
+                language=tagger.detect_language_offline(info.get('text_sample'), info.get('language_code')),
+                num_pages=info.get('num_pages'),
+                num_chapters=info.get('num_chapters'),
+                total_words=info.get('total_words'),
+                total_chars=info.get('total_chars'),
+                estimated_tokens=info.get('estimated_tokens'),
+                has_cover=1 if has_cover else 0,
+            )
+        except library_db.DuplicateInsert as duplicate:
+            # The same file arrived at the same moment through another request
+            library_db.remove_files([final_rel, cover_rel])
+            existing = library_db.get_book(library_id, duplicate.existing_id)
+            if reuse_duplicate and existing:
+                return existing, True
+            raise DuplicateBook(existing) from None
     except BaseException:
         library_db.remove_files([final_rel, cover_rel])
         raise
@@ -278,7 +299,8 @@ def import_book(library_id, file_storage, folder_id=None, allow_duplicate=False,
                 pass
 
     logger.info(f"Library book added {book_id[:8]} ({ext}, {size} bytes)")
-    schedule_tagging(library_id, book_id, _tagging_context(info))
+    record = library_db.get_book_record(library_id, book_id)
+    schedule_tagging(library_id, book_id, _tagging_context(info), stamp=record['tag_updated_at'] if record else None)
     return book, False
 
 
@@ -291,19 +313,24 @@ def _get_executor():
         return _executor
 
 
-def schedule_tagging(library_id, book_id, context=None):
+def schedule_tagging(library_id, book_id, context=None, stamp=None):
+    """Queue tagging; `stamp` (tag_updated_at when queued) makes sure a book is tagged once."""
     if TAGGING_INLINE:
-        _run_tagging(library_id, book_id, context)
+        _run_tagging(library_id, book_id, context, stamp)
     else:
-        _get_executor().submit(_run_tagging, library_id, book_id, context)
+        _get_executor().submit(_run_tagging, library_id, book_id, context, stamp)
 
 
-def _run_tagging(library_id, book_id, context=None):
+def _run_tagging(library_id, book_id, context=None, stamp=None):
     try:
         book = library_db.get_book_record(library_id, book_id, include_deleted=True)
         if not book:
             return
-        library_db.set_tag_status(book_id, 'running')
+        if stamp is not None:
+            if not library_db.start_tagging(book_id, stamp):
+                return  # re-queued in the meantime (another copy of this job runs it)
+        else:
+            library_db.set_tag_status(book_id, 'running')
         if context is None:
             info = extract(library_db.abs_path(book['file_path']), book['file_type'], include_cover=False)
             context = _tagging_context(info)
@@ -338,11 +365,23 @@ def _maintenance(library_id):
     _last_maintenance[library_id] = now
     try:
         library_db.purge_expired(library_id)
-        for book_id in library_db.claim_stale_tagging(library_id):
-            schedule_tagging(library_id, book_id)
+        for book_id, stamp in library_db.claim_stale_tagging(library_id):
+            schedule_tagging(library_id, book_id, stamp=stamp)
         library_db.fail_stale_translations()
     except Exception:
         logger.exception('Library maintenance failed')
+
+
+def storage_warning():
+    """On Render the disk is wiped at every deploy unless LIBRARY_DATA_DIR points to a persistent disk."""
+    if os.getenv('RENDER') and not os.getenv('LIBRARY_DATA_DIR'):
+        return ('I libri sono salvati sul disco temporaneo di Render: a ogni nuovo deploy o riavvio vengono '
+                'cancellati. Aggiungi un Persistent Disk al servizio e imposta LIBRARY_DATA_DIR sul suo percorso.')
+    return None
+
+
+if storage_warning():
+    logger.warning('LIBRARY_DATA_DIR is not set on Render: the library will be wiped at every deploy')
 
 
 # ---------------------------------------------------------------------------
@@ -364,6 +403,7 @@ def api_library():
         'tags': library_db.list_tags(library_id),
         'trash_count': library_db.trash_count(library_id),
         'ai': tagger.ai_status(),
+        'storage_warning': storage_warning(),
     })
 
 
@@ -403,8 +443,7 @@ def api_library_open():
 
 @bp.route('/api/library/key/rotate', methods=['POST'])
 def api_library_rotate_key():
-    library = current_library()
-    code = library_db.rotate_code(library['id'])
+    code = library_db.rotate_code(writable_library_id())
     g.library_cookie = code
     return jsonify({'code': library_db.format_code(code)})
 
@@ -415,7 +454,7 @@ def api_library_rotate_key():
 
 @bp.route('/api/library/folders', methods=['POST'])
 def api_create_folder():
-    library_id = current_library_id()
+    library_id = writable_library_id()
     data = _json()
     folder = library_db.create_folder(
         library_id, data.get('name'),
@@ -427,7 +466,7 @@ def api_create_folder():
 
 @bp.route('/api/library/folders/tree', methods=['POST'])
 def api_folder_tree():
-    library_id = current_library_id()
+    library_id = writable_library_id()
     data = _json()
     paths = data.get('paths') or []
     if not isinstance(paths, list) or len(paths) > 2000 or not all(isinstance(p, str) for p in paths):
@@ -440,7 +479,7 @@ def api_folder_tree():
 
 @bp.route('/api/library/folders/<folder_id>', methods=['PATCH'])
 def api_update_folder(folder_id):
-    library_id = current_library_id()
+    library_id = writable_library_id()
     data = _json()
     changes = {key: data[key] for key in ('name', 'color') if key in data}
     folder = library_db.update_folder(library_id, _id(folder_id, 'cartella'), **changes)
@@ -453,7 +492,7 @@ def api_update_folder(folder_id):
 
 @bp.route('/api/library/books', methods=['POST'])
 def api_upload_book():
-    library_id = current_library_id()
+    library_id = writable_library_id()
     file = request.files.get('file')
     if not file or not file.filename:
         raise LibraryError('Nessun file caricato')
@@ -472,7 +511,7 @@ def api_upload_book():
 
 @bp.route('/api/library/books/update', methods=['POST'])
 def api_update_books():
-    library_id = current_library_id()
+    library_id = writable_library_id()
     data = _json()
     changes = {}
     if 'color' in data:
@@ -485,7 +524,7 @@ def api_update_books():
 
 @bp.route('/api/library/books/tags', methods=['POST'])
 def api_book_tags():
-    library_id = current_library_id()
+    library_id = writable_library_id()
     data = _json()
     book_ids = _ids(data.get('book_ids'), 'libro')
     add = data.get('add') or []
@@ -509,7 +548,7 @@ def api_get_book(book_id):
 
 @bp.route('/api/library/books/<book_id>', methods=['PATCH'])
 def api_update_book(book_id):
-    library_id = current_library_id()
+    library_id = writable_library_id()
     data = _json()
     changes = {key: data[key] for key in ('title', 'author', 'color', 'favorite') if key in data}
     if 'favorite' in changes:
@@ -520,12 +559,12 @@ def api_update_book(book_id):
 
 @bp.route('/api/library/books/<book_id>/retag', methods=['POST'])
 def api_retag_book(book_id):
-    library_id = current_library_id()
+    library_id = writable_library_id()
     book = library_db.get_book_record(library_id, _id(book_id, 'libro'))
     if not book:
         raise NotFound('Libro non trovato')
-    library_db.set_tag_status(book['id'], 'pending')
-    schedule_tagging(library_id, book['id'])
+    stamp = library_db.set_tag_status(book['id'], 'pending')
+    schedule_tagging(library_id, book['id'], stamp=stamp)
     return jsonify({'ok': True})
 
 
@@ -563,7 +602,7 @@ def api_book_download(book_id):
 def api_move():
     data = _json()
     result = library_db.move_items(
-        current_library_id(),
+        writable_library_id(),
         book_ids=_ids(data.get('book_ids'), 'libro'),
         folder_ids=_ids(data.get('folder_ids'), 'cartella'),
         target_id=_id(data.get('target_id'), 'cartella', optional=True),
@@ -576,7 +615,7 @@ def api_reorder():
     data = _json()
     kind = data.get('kind')
     count = library_db.reorder(
-        current_library_id(), kind,
+        writable_library_id(), kind,
         _id(data.get('parent_id'), 'cartella', optional=True),
         _ids(data.get('ids'), 'elemento'),
     )
@@ -587,13 +626,13 @@ def api_reorder():
 def api_update_tag(tag_id):
     data = _json()
     changes = {key: data[key] for key in ('name', 'color') if key in data}
-    tag = library_db.update_tag(current_library_id(), _id(tag_id, 'tag'), **changes)
+    tag = library_db.update_tag(writable_library_id(), _id(tag_id, 'tag'), **changes)
     return jsonify({'tag': tag})
 
 
 @bp.route('/api/library/tags/<tag_id>', methods=['DELETE'])
 def api_delete_tag(tag_id):
-    library_db.delete_tag(current_library_id(), _id(tag_id, 'tag'))
+    library_db.delete_tag(writable_library_id(), _id(tag_id, 'tag'))
     return jsonify({'ok': True})
 
 
@@ -617,7 +656,7 @@ def api_trash_list():
 def api_trash_add():
     data = _json()
     result = library_db.trash_items(
-        current_library_id(),
+        writable_library_id(),
         book_ids=_ids(data.get('book_ids'), 'libro'),
         folder_ids=_ids(data.get('folder_ids'), 'cartella'),
     )
@@ -626,7 +665,7 @@ def api_trash_add():
 
 @bp.route('/api/library/trash/restore', methods=['POST'])
 def api_trash_restore():
-    library_id = current_library_id()
+    library_id = writable_library_id()
     data = _json()
     if data.get('trash_id'):
         result = library_db.restore_trash(library_id, _id(data['trash_id'], 'operazione'))
@@ -643,7 +682,7 @@ def api_trash_restore():
 def api_trash_purge():
     data = _json()
     result = library_db.purge_items(
-        current_library_id(),
+        writable_library_id(),
         book_ids=_ids(data.get('book_ids'), 'libro'),
         folder_ids=_ids(data.get('folder_ids'), 'cartella'),
     )
@@ -652,7 +691,7 @@ def api_trash_purge():
 
 @bp.route('/api/library/trash/empty', methods=['POST'])
 def api_trash_empty():
-    return jsonify(library_db.empty_trash(current_library_id()))
+    return jsonify(library_db.empty_trash(writable_library_id()))
 
 
 # ---------------------------------------------------------------------------
@@ -674,5 +713,5 @@ def api_translation_download(translation_id):
 
 @bp.route('/api/library/translations/<translation_id>', methods=['DELETE'])
 def api_translation_delete(translation_id):
-    library_db.delete_translation(current_library_id(), _translation_id(translation_id))
+    library_db.delete_translation(writable_library_id(), _translation_id(translation_id))
     return jsonify({'ok': True})
