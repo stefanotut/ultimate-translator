@@ -762,6 +762,7 @@
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+.book-cover .cover-gen { padding-bottom: 40px; }  /* keep the author clear of the format badge */
 .cover-gen::before {
     content: '';
     position: absolute;
