@@ -632,7 +632,9 @@ def index():
 @app.route('/libreria')
 @auth.page_login_required
 def libreria():
-    return render_template('libreria.html')
+    # UNA libreria: cartelle, tag e tutto quello che c'era (vedi libreria_ponte.py);
+    # la pagina di prima resta su /libreria/classica
+    return render_template('library.html')
 
 
 @app.route('/healthz')

@@ -10,8 +10,12 @@ login e una libreria sua (la tabella dei job) con lettore, ascolto, appunti e
 traduzione di pagina. Regola dell'utente: le funzioni che ci sono NON si
 tolgono e NON si cambiano.
 
-Quindi le cartelle stanno ACCANTO, non al posto:
-- pagina nuova /libreria/cartelle; /libreria resta com'era;
+Prima le cartelle stavano ACCANTO (/libreria/cartelle); poi l'utente ha chiesto
+UNA sola libreria: ora /libreria E' la libreria a cartelle, con dentro tutto
+quello che aveva la pagina di prima (traduzioni in corso ed errori, letto X%,
+audiolibri, evidenziazioni, Leggi con il lettore di sempre). La pagina vecchia
+resta raggiungibile su /libreria/classica come rete di sicurezza.
+- /libreria/cartelle rimanda a /libreria;
 - e' la libreria dell'account (login). Il "codice libreria" apre solo le tre
   chiamate che usa import_books.py, che l'OTP non lo puo' fare;
 - ogni libro caricato nelle cartelle diventa anche un libro della libreria di
@@ -37,7 +41,7 @@ import os
 import threading
 import uuid
 
-from flask import g, request
+from flask import g, jsonify, render_template, request
 
 import auth
 import covers
@@ -45,7 +49,9 @@ import store
 
 logger = logging.getLogger(__name__)
 
-PAGINA = '/libreria/cartelle'
+PAGINA = '/libreria/cartelle'          # indirizzo della prima versione: ora rimanda a LIBRERIA
+LIBRERIA = '/libreria'
+FORMATI = {'epub', 'pdf', 'docx', 'txt', 'md'}   # quelli che /api/importa accetta da sempre
 
 # Le sole chiamate aperte al codice libreria (senza login): quelle di import_books.py.
 CHIAMATE_COL_CODICE = {
@@ -77,7 +83,9 @@ def init(app, base_dir, prepara_pdf, dimentica_pagine, data_dir=None, sync_all_a
     """Monta la libreria a cartelle sul portale. Da chiamare una volta, all'avvio."""
     import library
     import library_db
-    library.PAGE_PATH = PAGINA          # /libreria resta la pagina di sempre
+    library.PAGE_PATH = PAGINA          # la rotta /libreria e' di app.py, che mostra questa libreria
+    library.PAGE_REDIRECT = LIBRERIA
+    library.ALLOWED_EXTENSIONS = set(FORMATI)
 
     library_db.init(data_dir or os.environ.get('LIBRARY_DATA_DIR')
                     or os.path.join(base_dir, 'data', 'libreria'))
@@ -92,6 +100,8 @@ def init(app, base_dir, prepara_pdf, dimentica_pagine, data_dir=None, sync_all_a
     pagine = [r.rule for r in app.url_map.iter_rules() if r.endpoint == 'library.library_page']
     if pagine != [PAGINA]:
         raise RuntimeError('Pagina delle cartelle registrata su %r invece di %s' % (pagine, PAGINA))
+    app.add_url_rule('/libreria/classica', 'libreria_classica', _pagina_classica)
+    app.add_url_rule('/api/library/sync', 'libreria_sincronizza', _api_sincronizza, methods=['POST'])
 
     # I libri che ci sono gia' compaiono nelle cartelle senza aspettare la prima visita.
     if sync_all_avvio is None:
@@ -104,6 +114,35 @@ def init(app, base_dir, prepara_pdf, dimentica_pagine, data_dir=None, sync_all_a
                 logger.exception('Sincronizzazione iniziale delle cartelle non partita per %s', email)
             break          # una alla volta: le altre alla loro prima visita
     logger.info('Libreria a cartelle pronta su %s', library.PAGE_PATH)
+
+
+# ---------------------------------------------------------------------------
+# Pagine e chiamate in piu'
+# ---------------------------------------------------------------------------
+
+@auth.page_login_required
+def _pagina_classica():
+    """La pagina dei libri di prima: senza link, solo come rete di sicurezza."""
+    return render_template('libreria.html')
+
+
+def _api_sincronizza():
+    """Sincronizza subito: la pagina la chiama quando una traduzione finisce,
+    cosi' il libro compare senza aspettare il giro di ogni minuto."""
+    import library
+    try:
+        lib = library.current_library(create=False)
+    except library.LibraryError as e:
+        return jsonify({'error': e.message, 'code': e.code}), e.status
+    if not g.get('library_via_login'):
+        return jsonify({'error': 'Accesso richiesto', 'code': 'login_required'}), 401
+    if not _sync_in_corso.acquire(timeout=60):
+        return jsonify({'occupato': True}), 202
+    try:
+        indicizzati, sistemati = sincronizza(lib['id'])
+    finally:
+        _sync_in_corso.release()
+    return jsonify({'indicizzati': indicizzati, 'sistemati': sistemati})
 
 
 # ---------------------------------------------------------------------------

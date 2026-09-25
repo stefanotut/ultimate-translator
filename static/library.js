@@ -51,10 +51,13 @@ const VIEWS = {
     unfiled: { label: 'Senza cartella', icon: 'inbox' },
     favorites: { label: 'Preferiti', icon: 'star' },
     translated: { label: 'Tradotti', icon: 'globe' },
+    working: { label: 'In traduzione', icon: 'zap' },
+    problems: { label: 'Errori', icon: 'alert' },
     trash: { label: 'Cestino', icon: 'trash' },
 };
 
 const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
+const UPLOAD_FORMATS = new Set(['epub', 'pdf', 'docx', 'txt', 'md']);   // come /api/importa
 const UPLOAD_CONCURRENCY = 3;
 const collator = new Intl.Collator('it', { numeric: true, sensitivity: 'base' });
 
@@ -78,6 +81,7 @@ const ICONS = {
     upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>',
     download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
     read: '<path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>',
+    headphones: '<path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/>',
     search: '<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>',
     grid: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/>',
     list: '<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>',
@@ -186,7 +190,10 @@ function hashHue(text) {
     for (const ch of String(text)) h = (h * 31 + ch.codePointAt(0)) >>> 0;
     return h % 360;
 }
-function isTranslated(book) { return book.translations.some(t => t.status === 'completed'); }
+function isTranslated(book) {
+    const job = book.job_id ? state.jobById.get(book.job_id) : null;
+    return Boolean(job && !job.importato) || book.translations.some(t => t.status === 'completed');
+}
 function isTagging(book) { return book.tag_status === 'pending' || book.tag_status === 'running'; }
 function taggingLabel() { return state.ai && state.ai.enabled ? 'Analisi AI in corso...' : 'Assegnazione tag...'; }
 
@@ -221,6 +228,9 @@ async function api(method, url, body, retried) {
     let data = null;
     try { data = await response.json(); } catch (_) { data = null; }
     if (!response.ok) {
+        if (response.status === 401 && data && (data.code === 'login_required' || data.login_required)) {
+            location.href = '/login';
+        }
         if (response.status === 401 && data && data.code === 'no_library' && !retried) {
             await recoverLibrary();
             return api(method, url, body, true);
@@ -281,6 +291,10 @@ const state = {
     lastView: null,
     uploads: [],
     uploadNote: '',
+    jobs: [],
+    jobById: new Map(),
+    jobCounts: {},
+    jobsLoaded: false,
 };
 
 const el = {
@@ -407,6 +421,8 @@ function hashFor(view) {
         case 'unfiled': return '#/senza-cartella';
         case 'favorites': return '#/preferiti';
         case 'translated': return '#/tradotti';
+        case 'working': return '#/in-traduzione';
+        case 'problems': return '#/errori';
         case 'trash': return '#/cestino';
         default: return view.id ? `#/cartella/${view.id}` : '#/cartelle';
     }
@@ -419,7 +435,10 @@ function viewFromHash() {
         case 'senza-cartella': return { type: 'unfiled' };
         case 'preferiti': return { type: 'favorites' };
         case 'tradotti': return { type: 'translated' };
+        case 'in-traduzione': return { type: 'working' };
+        case 'errori': return { type: 'problems' };
         case 'cestino': return { type: 'trash' };
+        case '': return { type: 'all' };
         case 'cartella': return { type: 'folder', id: id || null };
         case 'libro': return { type: 'book', id };
         default: return { type: 'folder', id: null };
@@ -517,6 +536,7 @@ function computeView() {
     const tokens = fold(filters.q).split(/\s+/).filter(Boolean);
     let folders = [];
     let books = [];
+    let jobs = [];
     let mode = 'flat';
     let container = null;
 
@@ -550,6 +570,12 @@ function computeView() {
         case 'translated':
             books = state.books.filter(isTranslated);
             break;
+        case 'working':
+            jobs = activeJobs();
+            break;
+        case 'problems':
+            jobs = problemJobs();
+            break;
         default:
             break;
     }
@@ -558,6 +584,7 @@ function computeView() {
     const result = {
         folders: sortFolders(folders),
         books: sortBooks(books, flat),
+        jobs,
         mode,
         container,
         flat,
@@ -629,6 +656,10 @@ function coverHTML(book, small = false) {
     if (book.cover_url) {
         return `<img class="cover-img" src="${esc(book.cover_url)}" alt="" loading="lazy" decoding="async" draggable="false">`;
     }
+    const job = jobOf(book);
+    if (job && job.status === 'completed' && job.file_presente !== false) {
+        return `<img class="cover-img" src="/api/cover/${esc(job.task_id)}" alt="" loading="lazy" decoding="async" draggable="false">`;
+    }
     const base = colorHex(book.color) || `hsl(${hashHue(book.title)} 55% 46%)`;
     return `<div class="cover-gen" style="--c1:${base}">`
         + `<div class="cover-gen-title">${small ? '' : esc(book.title)}</div>`
@@ -676,7 +707,8 @@ function bookCardHTML(book, showFolder) {
                 ${coverHTML(book)}
                 <span class="fmt-badge fmt-${book.file_type}">${book.file_type.toUpperCase()}</span>
                 ${book.favorite ? `<span class="fav-badge" title="Preferito">${icon('starFill', 13)}</span>` : ''}
-                ${translationBadges(book)}
+                ${translationBadges(book) || portalTranslatedBadge(book)}
+                ${readBarHTML(book)}
             </div>
             ${color ? '<span class="color-ribbon" aria-hidden="true"></span>' : ''}
             <button class="card-check" data-action="toggle-select" aria-label="Seleziona" aria-pressed="${selected}">${icon('check', 14)}</button>
@@ -690,6 +722,7 @@ function bookCardHTML(book, showFolder) {
             </div>
             <div class="book-tags">${tagChipsHTML(book)}</div>
             <div class="book-meta">
+                ${portalMetaHTML(book)}
                 ${color ? '<span class="dot-color"></span>' : ''}
                 ${book.favorite ? `<span class="star">${icon('starFill', 12)}</span>` : ''}
                 ${done.length ? `<span class="tr-inline">${icon('globe', 12)}</span><span class="tr-inline">${esc(done.join(' '))}</span>` : ''}
@@ -845,6 +878,8 @@ function renderSidebar() {
         item('unfiled', unfiled, { type: 'folder', folder: '' }),
         item('favorites', favorites, { type: 'favorite' }),
         item('translated', translated),
+        ...(activeJobs().length || view.type === 'working' ? [item('working', activeJobs().length)] : []),
+        ...(problemJobs().length || view.type === 'problems' ? [item('problems', problemJobs().length)] : []),
     ].join(''));
 
     setHTML(el.tree, state.folders.length
@@ -866,7 +901,9 @@ function renderSidebar() {
         : ''));
 
     const ai = state.ai || {};
+    const c = state.jobCounts || {};
     setHTML(el.footer, `
+        ${state.jobsLoaded ? `<div class="portal-counts">${formatNumber(c.active || 0)} in traduzione · ${formatNumber(c.completed || 0)} pronti · ${formatNumber(c.total || 0)} in totale</div>` : ''}
         <button class="sb-item${view.type === 'trash' ? ' is-active' : ''}" data-nav="trash" data-drop="trash">${icon('trash')}<span class="sb-label">Cestino</span>${state.trashCount ? `<span class="sb-count">${formatNumber(state.trashCount)}</span>` : ''}</button>
         <button class="sb-item" data-action="open-key">${icon('key')}<span class="sb-label">Codice libreria</span></button>
         <div class="ai-status${ai.enabled ? ' is-on' : ''}">${icon('sparkles', 16)}<span>${ai.enabled
@@ -907,9 +944,10 @@ function renderHeader() {
         setHTML(el.headerActions, hasItems ? `<button class="btn btn-danger-ghost" data-action="empty-trash">${icon('trash')}<span class="btn-text">Svuota cestino</span></button>` : '');
     } else {
         setHTML(el.headerActions, `
+            <a class="btn btn-ghost" href="/" title="Traduci un nuovo libro">${icon('globe')}<span class="btn-text">Traduci un libro</span></a>
             <button class="btn btn-ghost" data-action="new-folder" title="Nuova cartella">${icon('folderPlus')}<span class="btn-text">Nuova cartella</span></button>
             <div class="split-btn">
-                <button class="btn btn-primary" data-action="upload-files" title="Carica libri EPUB o PDF">${icon('upload')}<span class="btn-text">Carica libri</span></button>
+                <button class="btn btn-primary" data-action="upload-files" title="Aggiungi libri che hai già: EPUB, PDF, DOCX, TXT">${icon('upload')}<span class="btn-text">Aggiungi libri</span></button>
                 <button class="btn btn-primary" data-action="upload-menu" aria-label="Altre opzioni di caricamento">${icon('chevronDown', 16)}</button>
             </div>`);
     }
@@ -934,8 +972,12 @@ function renderChips() {
         unfiled: (state.booksIn.get('') || []).length,
         favorites: state.books.filter(b => b.favorite).length,
         translated: state.books.filter(isTranslated).length,
+        working: activeJobs().length,
+        problems: problemJobs().length,
     };
-    setHTML(el.viewChips, ['all', 'folder', 'unfiled', 'favorites', 'translated'].map(type => {
+    const chipTypes = ['all', 'folder', 'unfiled', 'favorites', 'translated'];
+    for (const type of ['working', 'problems']) if (counts[type] || view.type === type) chipTypes.push(type);
+    setHTML(el.viewChips, chipTypes.map(type => {
         const active = view.type === type;
         return `<button class="chip${active ? ' is-active' : ''}" role="tab" aria-selected="${active}" data-action="view-chip" data-view="${type}">
             ${icon(VIEWS[type].icon, 15)}${VIEWS[type].label}<span class="chip-count">${formatNumber(counts[type])}</span>
@@ -1003,12 +1045,21 @@ function renderContent() {
         renderTrash();
         return;
     }
-    if (!state.books.length && !state.folders.length) {
+    if (state.view.type === 'working' || state.view.type === 'problems') {
+        renderJobsView();
+        return;
+    }
+    if (!state.books.length && !state.folders.length && !activeJobs().length) {
         setHTML(el.content, emptyLibraryHTML());
         return;
     }
     const view = computeView();
     let html = storageBannerHTML() + keyBannerHTML();
+    const inCima = !view.filtering && (state.view.type === 'all' || (state.view.type === 'folder' && !state.view.id));
+    const running = inCima ? activeJobs() : [];
+    if (running.length) {
+        html += sectionHTML('In traduzione', running.length, `<div class="book-grid">${running.map(jobCardHTML).join('')}</div>`);
+    }
     if (view.filtering) {
         const where = state.view.type === 'folder'
             ? (state.view.id ? `in «${esc(state.folderById.get(state.view.id).name)}» e sottocartelle` : 'in tutta la libreria')
@@ -1209,12 +1260,20 @@ function refresh() {
     }
     refreshPromise = (async () => {
         try {
+            let finished = false;
             do {
                 refreshAgain = false;
-                setData(await api('GET', '/api/library'));
+                const [data, done] = await Promise.all([
+                    api('GET', '/api/library'),
+                    loadJobs().catch(() => false),
+                ]);
+                finished = finished || done;
+                setData(data);
             } while (refreshAgain);
             render();
             schedulePoll();
+            scheduleJobsPoll();
+            if (finished) syncSoon();
         } finally {
             refreshPromise = null;
         }
@@ -1274,6 +1333,339 @@ function mergeBook(book) {
     else state.books[index] = book;
     reindex();
     scheduleRender();
+}
+
+// ---------------------------------------------------------------------------
+// Portale: la libreria di sempre dentro questa pagina
+// ---------------------------------------------------------------------------
+// Ogni libro delle cartelle e' un libro del portale (book.job_id). Tutto quello
+// che la pagina «I miei libri» di prima mostrava - traduzioni in corso ed
+// errori, letto X%, audiolibro, evidenziazioni - arriva da /api/jobs, la stessa
+// chiamata di allora: qui si unisce ai libri, senza copiare logica del server.
+const JOB_ACTIVE = new Set(['pending', 'running']);
+const JOB_LABEL = { pending: 'In coda', running: 'In corso', completed: 'Pronto', error: 'Errore', canceled: 'Annullato' };
+
+function jobOf(book) { return book && book.job_id ? state.jobById.get(book.job_id) || null : null; }
+function jobIsActive(job) { return JOB_ACTIVE.has(job.status); }
+function jobMissing(job) { return job.status === 'completed' && job.file_presente === false; }
+function activeJobs() { return state.jobs.filter(jobIsActive); }
+function problemJobs() { return state.jobs.filter(j => j.status === 'error' || j.status === 'canceled' || jobMissing(j)); }
+function readPct(job) { return job ? Math.round((job.read_percent || 0) * 100) : 0; }
+function canRead(book) {
+    const job = jobOf(book);
+    return Boolean(book.read_url) && !(job && jobMissing(job));
+}
+// I file scaricati portano dietro mezzo indirizzo del sito: si toglie, come faceva la pagina di prima.
+function cleanFileTitle(name) {
+    return String(name || '').replace(/\.[a-z0-9]+$/i, '')
+        .replace(/\((?:[^()]*(?:z-lib|1lib|z-library|annas-archive)[^()]*)\)/gi, '')
+        .replace(/_tradotto_\w+$/i, '')
+        .replace(/[_]+/g, ' ').replace(/\s{2,}/g, ' ').trim() || 'Libro';
+}
+function shortLang(name) { return String(name || '').slice(0, 2).toUpperCase(); }
+
+async function loadJobs() {
+    const all = [];
+    let counts = {};
+    for (let offset = 0; offset < 20000; offset += 200) {
+        const data = await api('GET', `/api/jobs?limit=200&offset=${offset}`);
+        const page = data.jobs || [];
+        all.push(...page);
+        counts = data.counts || counts;
+        if (page.length < 200) break;
+    }
+    let finished = false;
+    for (const job of all) {
+        const before = state.jobById.get(job.task_id);
+        if (before && JOB_ACTIVE.has(before.status) && job.status === 'completed') finished = true;
+    }
+    state.jobs = all;
+    state.jobById = new Map(all.map(j => [j.task_id, j]));
+    state.jobCounts = counts;
+    state.jobsLoaded = true;
+    return finished;
+}
+
+// Traduzioni in corso: ogni 3 secondi, come la pagina di prima; altrimenti ogni 20.
+let jobsTimer = null;
+function scheduleJobsPoll() {
+    clearTimeout(jobsTimer);
+    jobsTimer = setTimeout(pollJobs, activeJobs().length ? 3000 : 20000);
+}
+
+async function pollJobs() {
+    if (document.hidden) {
+        scheduleJobsPoll();
+        return;
+    }
+    try {
+        const finished = await loadJobs();
+        if (finished) {
+            syncSoon();          // rifa' refresh, che riprogramma il giro
+            return;
+        }
+        scheduleRender();
+    } catch (_) {
+        /* rete: si riprova al prossimo giro */
+    }
+    scheduleJobsPoll();
+}
+
+// Una traduzione e' finita: il libro entra subito fra i libri, senza aspettare
+// il giro di sincronizzazione del server (uno al minuto).
+let syncing = null;
+function syncSoon() {
+    if (syncing) return syncing;
+    syncing = (async () => {
+        try { await api('POST', '/api/library/sync'); } catch (_) { /* ci pensa il giro del server */ }
+        try { await refresh(); } catch (_) { /* idem */ }
+    })().finally(() => { syncing = null; });
+    return syncing;
+}
+
+function readBarHTML(book) {
+    const pct = readPct(jobOf(book));
+    return pct > 0 ? `<div class="read-bar" title="Letto al ${pct}%"><i style="width:${pct}%"></i></div>` : '';
+}
+
+function portalTranslatedBadge(book) {
+    const job = jobOf(book);
+    if (!job || job.importato) return '';
+    return `<div class="tr-badges"><span class="tr-badge" title="Tradotto in ${esc(job.target_lang || '')}">${icon('check', 10)}${esc(shortLang(job.target_lang))}</span></div>`;
+}
+
+function audioLabel(job) {
+    const a = (job && job.audio) || {};
+    if (a.stato === 'pronto') return `🎧 ${formatNumber(a.minuti)} min`;
+    if (a.stato === 'in_corso') return `🎧 ${a.fatti}/${a.capitoli}`;
+    if (a.stato === 'in_coda') return '🎧 in coda';
+    return '';
+}
+
+function portalMetaHTML(book) {
+    const job = jobOf(book);
+    if (!job) return '';
+    const parts = [];
+    const pct = readPct(job);
+    if (pct > 0) parts.push(`<span class="pm-read">letto ${pct}%</span>`);
+    const audio = audioLabel(job);
+    if (audio) parts.push(`<span class="pm-audio">${audio}</span>`);
+    if (job.annotations) parts.push(`<span class="pm-notes" title="Evidenziazioni">✎ ${formatNumber(job.annotations)}</span>`);
+    if (jobMissing(job)) parts.push('<span class="pm-missing">file non disponibile</span>');
+    return parts.join('');
+}
+
+function jobCardHTML(job) {
+    const title = cleanFileTitle(job.original_filename);
+    const pct = Math.round((job.progress || 0) * 100);
+    const active = jobIsActive(job);
+    const missing = jobMissing(job);
+    const kind = missing ? 'error' : job.status;
+    const label = missing ? 'Da rifare' : (JOB_LABEL[job.status] || job.status);
+    const cover = job.status === 'completed' && !missing
+        ? `<img class="cover-img" src="/api/cover/${esc(job.task_id)}" alt="" loading="lazy" decoding="async" draggable="false">`
+        : `<div class="cover-gen" style="--c1:hsl(${hashHue(title)} 40% 38%)"><div class="cover-gen-title">${esc(title)}</div></div>`;
+    const line = active ? (job.status === 'pending' && !pct ? 'In attesa di partire'
+            : `${pct}%${job.status_text ? ` — ${esc(job.status_text)}` : ''}`)
+        : job.status === 'error' ? esc(job.error || 'Traduzione non riuscita')
+        : missing ? 'file non più disponibile — da rifare'
+        : job.status === 'canceled' ? 'Traduzione annullata' : '';
+    return `<article class="card book-card job-card is-${esc(kind)}" data-action="job-open" data-job-id="${esc(job.task_id)}" tabindex="0" role="button" aria-label="${esc(title)} — ${esc(label)}">
+        <div class="book-cover-wrap"><div class="book-cover">
+            ${cover}
+            <span class="fmt-badge fmt-${esc(job.file_type || '')}">${esc((job.file_type || '').toUpperCase())}</span>
+            <span class="job-state s-${esc(kind)}">${esc(label)}</span>
+            ${active ? `<div class="job-bar"><i style="width:${pct}%"></i></div>` : ''}
+        </div></div>
+        <div class="book-info">
+            <div class="book-main">
+                <h3 class="book-title" title="${esc(title)}">${esc(title)}</h3>
+                <div class="book-author job-line">${line}</div>
+            </div>
+            <div class="book-meta">${job.target_lang ? `<span>verso ${esc(job.target_lang)}</span>` : ''}<span class="date">${formatDate(job.created_at)}</span></div>
+        </div>
+    </article>`;
+}
+
+function renderJobsView() {
+    const type = state.view.type;
+    const view = computeView();
+    let html;
+    if (view.jobs.length) {
+        html = sectionHTML(VIEWS[type].label, view.jobs.length, `<div class="book-grid">${view.jobs.map(jobCardHTML).join('')}</div>`);
+    } else if (type === 'working') {
+        html = `<div class="empty-state is-compact"><div class="empty-title">Nessuna traduzione in corso</div>
+            <p class="empty-text">Le traduzioni partono dalla pagina «Traduci»: qui ne segui l'avanzamento, e quando finiscono il libro entra fra i tuoi libri.</p>
+            <div class="empty-actions"><a class="btn btn-primary" href="/">${icon('globe')}Traduci un libro</a></div></div>`;
+    } else {
+        html = `<div class="empty-state is-compact"><div class="empty-title">Nessun errore</div>
+            <p class="empty-text">Qui compaiono le traduzioni non riuscite o annullate, e i libri il cui file va rifatto.</p></div>`;
+    }
+    setHTML(el.content, `<div class="content-inner layout-${state.layout}">${html}</div>`);
+}
+
+function portalDrawerHTML(book) {
+    const job = jobOf(book);
+    if (!job) return '';
+    const pct = readPct(job);
+    const rows = [];
+    const buttons = [];
+    if (pct > 0) rows.push(`<p class="portal-line">${icon('read', 15)}<span>Sei al ${pct}%${job.read_label ? ` — ${esc(job.read_label)}` : ''}</span></p>`);
+    if (!job.importato) rows.push(`<p class="portal-line">${icon('globe', 15)}<span>Tradotto verso ${esc(job.target_lang || '')}${job.model ? ` · ${esc(job.model)}` : ''} · ${esc(formatDate(job.created_at))}</span></p>`);
+    if (jobMissing(job)) rows.push(`<p class="portal-line is-error">${icon('alert', 15)}<span>Il file non è più disponibile: la traduzione va rifatta.</span></p>`);
+    const a = job.audio || {};
+    const audioable = job.status === 'completed' && !jobMissing(job) && (job.file_type === 'epub' || job.file_type === 'pdf');
+    if (a.stato === 'pronto') {
+        buttons.push(`<button class="btn btn-sm" data-action="audio-play" data-job-id="${esc(job.task_id)}">${icon('headphones', 15)}Ascolta l'audiolibro · ${formatNumber(a.minuti)} min</button>`);
+    } else if (a.stato === 'in_corso') {
+        rows.push(`<p class="portal-line">${icon('headphones', 15)}<span>Audiolibro in preparazione: ${a.fatti} di ${a.capitoli} capitoli</span></p>`);
+    } else if (a.stato === 'in_coda') {
+        rows.push(`<p class="portal-line">${icon('headphones', 15)}<span>Audiolibro in coda</span></p>`);
+    } else if (audioable) {
+        buttons.push(`<button class="btn btn-sm" data-action="audio-create" data-job-id="${esc(job.task_id)}">${icon('headphones', 15)}Crea l'audiolibro</button>`);
+    }
+    if (job.annotations) buttons.push(`<a class="btn btn-sm" href="/appunti?libro=${esc(job.task_id)}">${icon('edit', 15)}${plural(job.annotations, 'evidenziazione', 'evidenziazioni')}</a>`);
+    if (!rows.length && !buttons.length) return '';
+    return `<section class="drawer-section portal-section">
+        ${rows.join('')}
+        ${buttons.length ? `<div class="row-actions">${buttons.join('')}</div>` : ''}
+    </section>`;
+}
+
+function openJobModal(jobId) {
+    const job = state.jobById.get(jobId);
+    if (!job) return;
+    const title = cleanFileTitle(job.original_filename);
+    const active = jobIsActive(job);
+    const missing = jobMissing(job);
+    const pct = Math.round((job.progress || 0) * 100);
+    const links = [];
+    if (active) links.push(`<a class="btn" href="/ascolta/${esc(job.task_id)}">${icon('headphones', 16)}Ascolta mentre traduce</a>`);
+    if (job.status === 'completed' && !missing) links.push(`<a class="btn" href="/api/download/${esc(job.task_id)}">${icon('download', 16)}Scarica il file</a>`);
+    if (job.annotations) links.push(`<a class="btn" href="/appunti?libro=${esc(job.task_id)}">${icon('edit', 16)}${plural(job.annotations, 'evidenziazione', 'evidenziazioni')}</a>`);
+    const actions = [{ label: 'Chiudi', value: null }];
+    if (active) actions.push({ label: 'Annulla traduzione', danger: true, action: () => cancelJob(job) });
+    else actions.push({ label: 'Togli dalla libreria', danger: true, action: () => deleteJob(job) });
+    openModal({
+        title,
+        body: `<p class="muted-note">${esc((job.file_type || '').toUpperCase())}${job.target_lang ? ` · verso ${esc(job.target_lang)}` : ''}${job.model ? ` · ${esc(job.model)}` : ''} · ${esc(formatDate(job.created_at))}</p>
+            ${active ? `<div class="job-progress"><div class="job-bar is-inline"><i style="width:${pct}%"></i></div><p class="muted-note">${pct}%${job.status_text ? ` — ${esc(job.status_text)}` : ''}</p></div>` : ''}
+            ${job.status === 'error' ? `<p class="portal-line is-error">${icon('alert', 15)}<span>${esc(job.error || 'Traduzione non riuscita')}</span></p>` : ''}
+            ${job.status === 'canceled' ? '<p class="muted-note">Traduzione annullata.</p>' : ''}
+            ${missing ? `<p class="portal-line is-error">${icon('alert', 15)}<span>Il file non è più disponibile: la traduzione va rifatta.</span></p>` : ''}
+            ${links.length ? `<div class="row-actions">${links.join('')}</div>` : ''}`,
+        actions,
+    });
+}
+
+async function cancelJob(job) {
+    const ok = await confirmDialog({
+        title: 'Annullare la traduzione?',
+        message: `«${cleanFileTitle(job.original_filename)}»: la traduzione si ferma qui.`,
+        confirm: 'Annulla traduzione',
+        danger: true,
+    });
+    if (!ok) return false;          // la scheda resta aperta
+    const done = await run(() => api('POST', `/api/cancel/${encodeURIComponent(job.task_id)}`));
+    if (done) {
+        toast('Traduzione annullata', { duration: 2200 });
+        await refresh();
+    }
+}
+
+// E' la sola cosa che cancella davvero (come "Togli dalla libreria" di prima):
+// conferma esplicita, con il numero di evidenziazioni che se ne vanno.
+async function deleteJob(job) {
+    const note = job.annotations ? ` e le sue ${plural(job.annotations, 'evidenziazione', 'evidenziazioni')}` : '';
+    const ok = await confirmDialog({
+        title: 'Togliere dalla libreria?',
+        message: `«${cleanFileTitle(job.original_filename)}»: vengono eliminati il file${note}. Non si può annullare.`,
+        confirm: 'Togli dalla libreria',
+        danger: true,
+    });
+    if (!ok) return false;
+    const done = await run(() => api('DELETE', `/api/libro/${encodeURIComponent(job.task_id)}`));
+    if (done) {
+        toast('Tolto dalla libreria', { duration: 2200 });
+        await syncSoon();
+    }
+}
+
+async function createAudio(jobId, node) {
+    if (node) node.disabled = true;
+    const done = await run(() => api('POST', `/api/audiolibro/${encodeURIComponent(jobId)}`));
+    if (done) {
+        toast("Audiolibro in coda: si prepara in sottofondo", { type: 'success', duration: 3200 });
+        await loadJobs().catch(() => {});
+        render();
+    } else if (node) {
+        node.disabled = false;
+    }
+}
+
+async function createMissingAudio() {
+    const missing = state.jobs.filter(j => j.status === 'completed' && j.file_presente !== false
+        && (j.file_type === 'epub' || j.file_type === 'pdf')
+        && (!j.audio || j.audio.stato === 'assente' || j.audio.stato === 'errore')).length;
+    if (!missing) {
+        toast("Tutti i libri hanno già l'audio o sono già in coda", { duration: 3200 });
+        return;
+    }
+    // Con cento libri in libreria un tocco solo li metterebbe tutti in coda:
+    // prima si dice quanti sono.
+    const ok = await confirmDialog({
+        title: 'Creare gli audio mancanti?',
+        message: `${plural(missing, 'libro non ha', 'libri non hanno')} l'audiolibro: vanno in coda e si preparano uno alla volta in sottofondo. Puoi chiudere la pagina.`,
+        confirm: 'Metti in coda',
+    });
+    if (!ok) return;
+    const d = await run(() => api('POST', '/api/audiolibri'));
+    if (!d) return;
+    toast(d.accodati
+        ? `${plural(d.accodati, 'libro', 'libri')} in coda per l'audio${d.avviso ? ` — ${d.avviso}` : ''}`
+        : "Tutti i libri hanno già l'audio o sono già in coda", { type: d.avviso ? 'error' : 'success', duration: 6000 });
+    await loadJobs().catch(() => {});
+    render();
+}
+
+// L'audiolibro in una finestra sua: il pannello del libro si ridisegna a ogni
+// aggiornamento e fermerebbe l'audio a meta' traccia.
+async function openAudioModal(jobId) {
+    const job = state.jobById.get(jobId);
+    const data = await run(() => api('GET', `/api/audiolibro/${encodeURIComponent(jobId)}`));
+    if (!data) return;
+    const tracks = data.tracce || [];
+    if (!tracks.length) {
+        toast('Nessuna traccia pronta', { type: 'error' });
+        return;
+    }
+    let player = null;
+    openModal({
+        title: job ? cleanFileTitle(job.original_filename) : 'Audiolibro',
+        wide: true,
+        body: `<p class="muted-note">${plural(tracks.length, 'traccia', 'tracce')} · ${formatNumber(data.minuti || 0)} minuti${data.voce ? ` · voce ${esc(data.voce)}` : ''}</p>
+            <audio class="audio-player" controls preload="none"></audio>
+            <div class="track-list">${tracks.map((t, i) => `<button class="track" data-track="${i}">${i + 1}. ${Math.round((t.secondi || 0) / 60)} min</button>`).join('')}</div>`,
+        onOpen: (modal) => {
+            player = modal.el.querySelector('.audio-player');
+            const list = modal.el.querySelector('.track-list');
+            let current = -1;
+            const play = (i) => {
+                if (i < 0 || i >= tracks.length) return;
+                current = i;
+                player.src = `/api/audiolibro/${encodeURIComponent(jobId)}/${encodeURIComponent(tracks[i].file)}`;
+                player.play().catch(() => {});
+                list.querySelectorAll('.track').forEach((b, k) => b.classList.toggle('is-active', k === i));
+            };
+            list.addEventListener('click', (event) => {
+                const b = event.target.closest('[data-track]');
+                if (b) play(Number(b.dataset.track));
+            });
+            player.addEventListener('ended', () => play(current + 1));   // il libro va avanti da solo
+            play(0);
+        },
+        onClose: () => { if (player) player.pause(); },
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -1807,8 +2199,11 @@ async function deleteTag(tagId) {
 function openUploadMenu(anchor) {
     const target = currentFolderId();
     openMenu([
-        { label: 'Carica libri (EPUB, PDF)', icon: 'upload', action: () => pickFiles(target) },
-        { label: 'Carica una cartella', icon: 'folderUp', action: () => pickFolder(target) },
+        { label: 'Aggiungi libri (EPUB, PDF, DOCX, TXT)', icon: 'upload', action: () => pickFiles(target) },
+        { label: 'Aggiungi una cartella di libri', icon: 'folderUp', action: () => pickFolder(target) },
+        { separator: true },
+        { label: 'Traduci un nuovo libro', icon: 'globe', action: () => { location.href = '/'; } },
+        { label: 'Crea audio mancanti', icon: 'headphones', action: () => createMissingAudio() },
         { separator: true },
         { label: 'Nuova cartella', icon: 'folderPlus', action: () => createFolder(target) },
     ], anchor);
@@ -2213,10 +2608,12 @@ function drawerHTML(book) {
                 </div>
             </div>
             <div class="drawer-actions">
-                <button class="btn btn-gold" data-action="drawer-read">${icon('read', 17)}Leggi</button>
+                ${canRead(book) ? `<button class="btn btn-gold" data-action="drawer-read">${icon('read', 17)}${readPct(jobOf(book)) > 0 ? 'Riprendi la lettura' : 'Leggi'}</button>` : ''}
                 <button class="btn" data-action="drawer-download">${icon('download', 17)}Scarica</button>
                 <button class="icon-btn${book.favorite ? ' is-fav' : ''}" data-action="drawer-favorite" aria-label="${book.favorite ? 'Togli dai preferiti' : 'Aggiungi ai preferiti'}" title="${book.favorite ? 'Togli dai preferiti' : 'Aggiungi ai preferiti'}">${icon(book.favorite ? 'starFill' : 'star', 18)}</button>
             </div>
+
+            ${portalDrawerHTML(book)}
 
             <section class="drawer-section">
                 <h4>Tag ${hasAuto ? `<span class="note">${icon('sparkles', 11)} = assegnato automaticamente</span>` : ''}</h4>
@@ -2247,11 +2644,10 @@ function drawerHTML(book) {
                 <div data-drawer-colors>${colorSwatchesHTML(book.color)}</div>
             </section>
 
-            <section class="drawer-section">
+            ${translations.length ? `<section class="drawer-section">
                 <h4>Traduzioni</h4>
-                ${translations.length ? `<div class="translation-list">${translations.map(t => translationRowHTML(t)).join('')}</div>`
-                    : '<p class="muted-note">Nessuna traduzione ancora. Premi «Traduci» per scegliere lingua e modello AI: la traduzione resterà collegata a questo libro.</p>'}
-            </section>
+                <div class="translation-list">${translations.map(t => translationRowHTML(t)).join('')}</div>
+            </section>` : ''}
 
             <section class="drawer-section">
                 <h4>Dettagli</h4>
@@ -2399,13 +2795,13 @@ async function enqueueUploads(entries, targetFolderId, reading = {}) {
         const parts = entry.relPath.split('/');
         if (parts.some(part => part.startsWith('.'))) continue;
         const ext = entry.file.name.includes('.') ? entry.file.name.split('.').pop().toLowerCase() : '';
-        if (ext === 'epub' || ext === 'pdf') accepted.push(entry);
+        if (UPLOAD_FORMATS.has(ext)) accepted.push(entry);
         else skipped++;
     }
     const unreadable = reading.unreadable || [];
     if (!accepted.length) {
         const why = unreadable.length ? `${plural(unreadable.length, 'elemento non leggibile', 'elementi non leggibili')}` : (skipped ? plural(skipped, 'file ignorato', 'file ignorati') : '');
-        toast(why ? `Nessun file EPUB o PDF da caricare (${why})` : 'Nessun file da caricare', { type: 'error' });
+        toast(why ? `Nessun file EPUB, PDF, DOCX o TXT da caricare (${why})` : 'Nessun file da caricare', { type: 'error' });
         return;
     }
 
@@ -3121,6 +3517,9 @@ function handleCardClick(card, event) {
 async function handleAction(action, node) {
     const card = node.closest('[data-kind][data-id]');
     switch (action) {
+        case 'job-open': openJobModal(node.dataset.jobId); return;
+        case 'audio-create': createAudio(node.dataset.jobId, node); return;
+        case 'audio-play': openAudioModal(node.dataset.jobId); return;
         case 'toggle-select':
             if (card) toggleSelect(keyOf(card.dataset.kind, card.dataset.id));
             break;
@@ -3573,7 +3972,7 @@ async function init() {
     }
     const initial = viewFromHash();
     state.view = { type: '__init__' };
-    if (!location.hash) history.replaceState(null, '', hashFor({ type: 'folder', id: null }));
+    if (!location.hash) history.replaceState(null, '', hashFor({ type: 'all' }));
     applyView(initial);
     const code = new URLSearchParams(location.search).get('chiave');
     if (code) handleLinkedLibrary(code);

@@ -35,6 +35,8 @@ bp = Blueprint('library', __name__)
 COOKIE_NAME = 'ut_library'
 COOKIE_MAX_AGE = 10 * 365 * 24 * 3600
 ALLOWED_EXTENSIONS = {'epub', 'pdf'}
+METADATA_FORMATS = {'epub', 'pdf'}      # the ones book_metadata can read (cover, text, pages)
+READABLE_FORMATS = {'epub', 'pdf'}      # the ones the portal's reader opens
 MAX_BATCH = 5000
 
 _ID_RE = re.compile(r'^[0-9a-f]{32}$')
@@ -50,6 +52,7 @@ PAGE_PATH = os.getenv('LIBRARY_PAGE_PATH', '/libreria')
 # Hooks for the production portal (None = standalone behaviour of the branch)
 IDENTITY = None          # f(create) -> library dict or None (None = 401)
 PAGE_ALLOWED = None      # f() -> True if the page may be shown, else redirect to /login
+PAGE_REDIRECT = None     # the portal shows this library at its own address: send people there
 AFTER_IMPORT = None      # f(library_id, book_id) after a NEW book is stored
 ON_MAINTENANCE = None    # f(library_id) at most once a minute
 MIN_FREE_DISK_MB = int(os.getenv('MIN_FREE_DISK_MB', '500'))
@@ -189,7 +192,8 @@ def serialize_book(book):
     data = dict(book)
     data['cover_url'] = cover_url(book['id'], book['created_at']) if book.get('has_cover') else None
     # the portal's reader (production): read, listen, annotate like any other book
-    data['read_url'] = f"/leggi/{book['job_id']}" if book.get('job_id') else None
+    data['read_url'] = (f"/leggi/{book['job_id']}"
+                        if book.get('job_id') and book.get('file_type') in READABLE_FORMATS else None)
     return data
 
 
@@ -238,6 +242,20 @@ _JUNK_TITLE = re.compile(
 )
 
 
+_SITE_JUNK = re.compile(r'\((?:[^()]*(?:z-lib|1lib|z-library|annas-archive)[^()]*)\)', re.IGNORECASE)
+
+
+def _clean_file_title(filename):
+    """The title hidden in a file name, without what download sites and the
+    translator add ("(z-library.sk, 1lib.sk)", "_tradotto_Italiano")."""
+    base = os.path.basename(filename or '')
+    stem, ext = os.path.splitext(base)
+    stem = _SITE_JUNK.sub('', stem)
+    stem = re.sub(r'_tradotto_\w+$', '', stem, flags=re.IGNORECASE)
+    stem = re.sub(r'\s{2,}', ' ', stem.replace('_', ' ')).strip()
+    return title_from_filename((stem or 'libro') + ext)
+
+
 def clean_title(meta_title, filename):
     """
     The title stored in the file, unless it is junk left by a scanner or an
@@ -245,7 +263,7 @@ def clean_title(meta_title, filename):
     page 1-320") or another book's title in another alphabet: then the file
     name, which the user chose, is the better title.
     """
-    fallback = title_from_filename(filename)
+    fallback = _clean_file_title(filename)
     title = (meta_title or '').strip()
     if not title or _JUNK_TITLE.search(title):
         return fallback
@@ -274,7 +292,8 @@ def import_book(library_id, file_storage, folder_id=None, allow_duplicate=False,
     filename = os.path.basename((file_storage.filename or '').replace('\\', '/'))
     ext = _extension(filename)
     if ext not in ALLOWED_EXTENSIONS:
-        message = f'Formato non supportato: .{ext}. Usa EPUB o PDF.' if ext else 'Formato non supportato. Usa EPUB o PDF.'
+        formats = ', '.join(e.upper() for e in sorted(ALLOWED_EXTENSIONS))
+        message = f'Formato non supportato: .{ext}. Usa {formats}.' if ext else f'Formato non supportato. Usa {formats}.'
         raise LibraryError(message, 400, 'unsupported')
     if folder_id:
         library_db.get_folder(library_id, folder_id)  # fail fast if the folder is gone
@@ -306,12 +325,15 @@ def import_book(library_id, file_storage, folder_id=None, allow_duplicate=False,
                     return existing, True
                 raise DuplicateBook(existing)
 
-        try:
-            info = extract(tmp_path, ext)
-        except BookReadError as e:
-            raise LibraryError(str(e), 400, 'unreadable')
-        finally:
-            _free_pdf_cache()
+        if ext in METADATA_FORMATS:
+            try:
+                info = extract(tmp_path, ext)
+            except BookReadError as e:
+                raise LibraryError(str(e), 400, 'unreadable')
+            finally:
+                _free_pdf_cache()
+        else:
+            info = {}          # DOCX, TXT, MD: title from the file name, tags from the title
 
         final_path = library_db.abs_path(final_rel)
         os.makedirs(os.path.dirname(final_path), exist_ok=True)
@@ -381,13 +403,14 @@ def adopt_existing_file(library_id, path, filename, ext, job_id, folder_id=None)
                 break
             digest.update(chunk)
             size += len(chunk)
-    try:
-        info = extract(path, ext)
-    except BookReadError as e:
-        logger.warning(f"Metadata not readable for portal book {job_id[:8]}: {e}")
-        info = {}
-    finally:
-        _free_pdf_cache()
+    info = {}
+    if ext in METADATA_FORMATS:
+        try:
+            info = extract(path, ext)
+        except BookReadError as e:
+            logger.warning(f"Metadata not readable for portal book {job_id[:8]}: {e}")
+        finally:
+            _free_pdf_cache()
     book_id = uuid.uuid4().hex
     cover_rel = library_db.cover_rel(library_id, book_id)
     has_cover = False
@@ -420,7 +443,7 @@ def adopt_existing_file(library_id, path, filename, ext, job_id, folder_id=None)
         library_db.remove_files([cover_rel])
         raise
     record = library_db.get_book_record(library_id, book_id)
-    schedule_tagging(library_id, book_id, _tagging_context(info) if info else None,
+    schedule_tagging(library_id, book_id, _tagging_context(info),
                      stamp=record['tag_updated_at'] if record else None)
     logger.info(f"Library indexed portal book {job_id[:8]} as {book_id[:8]}")
     return book
@@ -518,6 +541,8 @@ if storage_warning():
 def library_page():
     if PAGE_ALLOWED is not None and not PAGE_ALLOWED():
         return redirect('/login')
+    if PAGE_REDIRECT:
+        return redirect(PAGE_REDIRECT)
     return render_template('library.html')
 
 

@@ -128,7 +128,9 @@ def test_duplicates_are_detected(client, pdf_file):
 
 
 def test_bad_files_are_rejected(client, tmp_path):
-    text = tmp_path / 'notes.txt'
+    # nel portale TXT, DOCX e MD si importano (come con /api/importa): il
+    # formato davvero non supportato qui e' un altro
+    text = tmp_path / 'notes.exe'
     text.write_text('hello')
     assert upload(client, str(text)).get_json()['code'] == 'unsupported'
 

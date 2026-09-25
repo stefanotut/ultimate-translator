@@ -33,21 +33,25 @@ def _script(app, code):
 # Accanto, non al posto
 # ---------------------------------------------------------------------------
 
-def test_la_libreria_di_sempre_resta_su_libreria(app, client):
+def test_una_sola_libreria_su_libreria(app, client):
     pagina = client.get('/libreria')
     assert pagina.status_code == 200
     html = pagina.get_data(as_text=True)
-    assert 'I miei libri' in html and 'btn-importa' in html       # la pagina di sempre
-    assert '/libreria/cartelle' in html                            # piu' la scheda nuova
-    cartelle = client.get('/libreria/cartelle')
-    assert cartelle.status_code == 200
-    assert '/static/library.js' in cartelle.get_data(as_text=True)
+    assert '/static/library.js' in html and 'I miei libri' in html        # la libreria unica
+    # il vecchio indirizzo delle cartelle porta alla libreria unica
+    vecchio = client.get('/libreria/cartelle')
+    assert vecchio.status_code in (301, 302) and vecchio.headers['Location'].endswith('/libreria')
+    # la pagina di prima resta come rete di sicurezza, identica
+    classica = client.get('/libreria/classica')
+    assert classica.status_code == 200
+    assert 'btn-importa' in classica.get_data(as_text=True)
 
 
 def test_senza_login_niente_cartelle(app):
     anonimo = app.test_client()
-    risposta = anonimo.get('/libreria/cartelle')
-    assert risposta.status_code in (301, 302) and '/login' in risposta.headers['Location']
+    for pagina in ('/libreria', '/libreria/cartelle', '/libreria/classica'):
+        risposta = anonimo.get(pagina)
+        assert risposta.status_code in (301, 302) and '/login' in risposta.headers['Location'], pagina
     assert anonimo.get('/api/library').status_code == 401
     assert anonimo.post('/api/library/folders', json={'name': 'x'}).status_code == 401
 
@@ -222,3 +226,60 @@ def test_i_titoli_spazzatura_lasciano_il_posto_al_nome_del_file():
         'Influence: The Psychology of Persuasion'
     assert library.clean_title('Documenting Software Architectures', 'dsa.pdf') == 'Documenting Software Architectures'
     assert library.clean_title('高績效心智', '高績效心智.epub') == '高績效心智'
+
+
+# ---------------------------------------------------------------------------
+# Libreria unica: tutti i formati di prima, e i libri tradotti che compaiono subito
+# ---------------------------------------------------------------------------
+
+def test_docx_txt_e_md_si_aggiungono_come_con_importa(app, client, tmp_path):
+    import docx
+    documento = docx.Document()
+    documento.add_paragraph('Capitolo uno. Il copywriting spiegato semplice.')
+    percorso_docx = str(tmp_path / 'Il mio libro (z-library.sk, 1lib.sk).docx')
+    documento.save(percorso_docx)
+    percorso_txt = tmp_path / 'appunti_tradotto_Italiano.txt'
+    percorso_txt.write_text('Un testo semplice.', encoding='utf-8')
+    percorso_md = tmp_path / 'scaletta.md'
+    percorso_md.write_text('# Scaletta', encoding='utf-8')
+
+    titoli = {}
+    for percorso in (percorso_docx, str(percorso_txt), str(percorso_md)):
+        risposta = upload(client, percorso)
+        assert risposta.status_code == 201, risposta.get_json()
+        libro = risposta.get_json()['book']
+        assert libro['job_id'] and libro['read_url'] is None        # si scarica, non si apre nel lettore
+        job = store.get_job(libro['job_id'], owner=UNO)
+        assert job['provider'] == 'importato' and job['file_type'] == libro['file_type']
+        titoli[libro['file_type']] = libro['title']
+    assert titoli == {'docx': 'Il mio libro', 'txt': 'appunti', 'md': 'scaletta'}
+
+
+def test_i_libri_docx_del_portale_entrano_nella_libreria(app, client, tmp_path):
+    percorso = str(tmp_path / 'tradotto.docx')
+    import docx
+    docx.Document().save(percorso)
+    store.create_job(id='22222222-3333-4444-5555-666666666666', owner=UNO,
+                     original_filename='Manuale_tradotto_Italiano.docx', input_path=None, output_path=percorso,
+                     output_filename='Manuale_tradotto_Italiano.docx', file_type='docx',
+                     source_lang='Inglese', target_lang='Italiano', provider='anthropic', model='claude',
+                     status='completed', progress=1.0, status_text='Completato!')
+    assert libreria_ponte.sincronizza(_library_id(client)) == (1, 0)
+    libro = state(client)['books'][0]
+    assert libro['title'] == 'Manuale' and libro['file_type'] == 'docx' and libro['read_url'] is None
+
+
+def test_la_pagina_sincronizza_subito_quando_una_traduzione_finisce(app, client, tmp_path, pdf_file):
+    percorso = str(tmp_path / 'appena_tradotto.pdf')
+    with open(pdf_file, 'rb') as a, open(percorso, 'wb') as b:
+        b.write(a.read())
+    store.create_job(id='33333333-4444-5555-6666-777777777777', owner=UNO,
+                     original_filename='Appena tradotto.pdf', input_path=None, output_path=percorso,
+                     output_filename='Appena tradotto.pdf', file_type='pdf',
+                     source_lang='Inglese', target_lang='Italiano', provider='anthropic', model='claude',
+                     status='completed', progress=1.0, status_text='Completato!')
+    risposta = client.post('/api/library/sync')
+    assert risposta.status_code == 200 and risposta.get_json()['indicizzati'] == 1
+    assert [b['job_id'] for b in state(client)['books']] == ['33333333-4444-5555-6666-777777777777']
+    # col solo codice libreria (lo script) la sincronizzazione non si chiama
+    assert _script(app, _codice(client)).post('/api/library/sync').status_code == 401
