@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>La mia libreria - ULTIMATE TRANSLATOR</title>
+    <meta name="description" content="La tua libreria personale di EPUB e PDF: cartelle, colori, tag automatici e traduzione AI con un clic.">
+    <meta name="robots" content="noindex, nofollow">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/library.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#128218;</text></svg>">
+</head>
+<body class="lib-body">
+
+    <div class="lib-app">
+
+        <!-- Sidebar -->
+        <aside class="lib-sidebar" id="lib-sidebar" aria-label="Navigazione libreria">
+            <div class="sb-top">
+                <a class="sb-brand" href="/">ULTIMATE <span>TRANSLATOR</span></a>
+                <nav class="app-switch" aria-label="Sezioni">
+                    <a class="app-switch-link" href="/">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                        Traduttore
+                    </a>
+                    <a class="app-switch-link is-active" href="/libreria" aria-current="page">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+                        Libreria
+                    </a>
+                </nav>
+            </div>
+            <div class="sb-scroll" id="sb-scroll">
+                <div class="sb-group" id="sb-views"></div>
+                <div class="sb-group">
+                    <div class="sb-heading">
+                        <span>Le tue cartelle</span>
+                        <button class="sb-heading-btn" data-action="new-folder-root" title="Nuova cartella" aria-label="Nuova cartella">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                        </button>
+                    </div>
+                    <div class="sb-tree" id="sb-tree"></div>
+                </div>
+                <div class="sb-group" id="sb-tags-group">
+                    <div class="sb-heading"><span>Tag</span></div>
+                    <div class="sb-tags" id="sb-tags"></div>
+                </div>
+            </div>
+            <div class="sb-footer" id="sb-footer"></div>
+        </aside>
+        <div class="sb-backdrop" data-action="close-sidebar"></div>
+
+        <!-- Main -->
+        <main class="lib-main">
+            <header class="lib-header">
+                <div class="lib-header-row">
+                    <button class="icon-btn sb-toggle" data-action="open-sidebar" aria-label="Apri menu">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+                    </button>
+                    <nav class="crumbs" id="crumbs" aria-label="Percorso"></nav>
+                    <div class="header-actions" id="header-actions"></div>
+                </div>
+                <div class="lib-toolbar">
+                    <label class="search-box">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                        <input type="search" id="search-input" placeholder="Cerca titoli, autori, tag, cartelle..." autocomplete="off" aria-label="Cerca nella libreria">
+                        <kbd class="search-kbd">/</kbd>
+                    </label>
+                    <div class="toolbar-actions" id="toolbar-actions"></div>
+                </div>
+                <div class="chips-row" id="view-chips" role="tablist" aria-label="Filtra"></div>
+                <div class="chips-row tag-chips" id="filter-chips" aria-label="Filtra per tag"></div>
+            </header>
+            <div class="lib-scroll" id="lib-scroll">
+                <div class="lib-content" id="lib-content" aria-live="polite">
+                    <div class="lib-loading">
+                        <svg class="spinner-svg" width="26" height="26" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none" stroke-dasharray="31.4 31.4" stroke-linecap="round"/></svg>
+                        <span>Caricamento libreria...</span>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <div class="drawer-root" id="drawer-root"></div>
+    <div class="selection-bar" id="selection-bar" aria-live="polite"></div>
+    <div class="upload-panel" id="upload-panel" aria-live="polite"></div>
+    <div class="toast-stack" id="toast-stack" aria-live="polite"></div>
+    <div id="modal-root"></div>
+    <div class="drop-overlay" id="drop-overlay" aria-hidden="true">
+        <div class="drop-overlay-card">
+            <svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            <div class="drop-overlay-title" id="drop-overlay-title">Rilascia per caricare</div>
+            <div class="drop-overlay-sub">File EPUB e PDF, anche intere cartelle</div>
+        </div>
+    </div>
+
+    <input type="file" id="file-input" accept=".epub,.pdf,application/epub+zip,application/pdf" multiple hidden>
+    <input type="file" id="folder-input" webkitdirectory directory multiple hidden>
+
+    <script src="/static/library.js" defer></script>
+</body>
+</html>

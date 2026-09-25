@@ -4,4 +4,6 @@ __pycache__/
 *.pyc
 uploads/
 outputs/
+data/
 .DS_Store
+.pytest_cache/

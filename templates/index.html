@@ -93,6 +93,21 @@
 
     <div class="container">
 
+        <!-- App navigation -->
+        <nav class="app-nav" aria-label="Sezioni">
+            <div class="app-switch">
+                <a class="app-switch-link is-active" href="/" aria-current="page">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                    Traduttore
+                </a>
+                <a class="app-switch-link" href="/libreria">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+                    Libreria
+                    <span class="app-switch-badge" id="nav-library-count" hidden></span>
+                </a>
+            </div>
+        </nav>
+
         <!-- API Status Bar -->
         <div class="api-status-bar" id="api-status-bar">
             <div class="api-status-item" id="api-status-openai">
@@ -163,12 +178,20 @@
                         <div class="file-card-meta">
                             <span class="file-card-size" id="file-card-size">-</span>
                             <span class="file-card-type" id="file-card-type">-</span>
+                            <span class="file-card-library" id="file-card-library" hidden>Dalla tua libreria</span>
                         </div>
                     </div>
                     <button class="file-card-remove" id="file-card-remove" title="Rimuovi file">
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                     </button>
                 </div>
+
+                <!-- Save to library toggle (shown for uploaded files) -->
+                <label class="save-library" id="save-library" hidden>
+                    <input type="checkbox" id="save-to-library" checked>
+                    <span class="save-library-switch" aria-hidden="true"></span>
+                    <span class="save-library-text"><strong>Salva nella mia libreria</strong> con tag automatici: ritroverai originale e traduzione in <a href="/libreria">Libreria</a></span>
+                </label>
 
                 <!-- Language Detection Badge -->
                 <div class="detect-badge" id="detect-badge">
@@ -360,6 +383,10 @@
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                 <span>Scarica File Tradotto</span>
             </a>
+            <a class="download-library-link" id="download-library-link" href="/libreria" hidden>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+                <span>Apri nella libreria</span>
+            </a>
         </div>
 
         <!-- Error Section -->
@@ -459,7 +486,8 @@
                         <svg class="faq-chevron" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
                     </button>
                     <div class="faq-answer">
-                        <p>Assolutamente si. I tuoi file vengono processati localmente e inviati alle API di OpenAI o Anthropic solo per la traduzione. Dopo il completamento, i file vengono eliminati dal server. Non conserviamo copie dei tuoi documenti e non condividiamo i tuoi dati con terze parti.</p>
+                        <p>I tuoi file vengono inviati alle API di OpenAI o Anthropic solo per la traduzione (e, se salvi il libro nella libreria, per assegnare i tag automatici). Non condividiamo i tuoi dati con terze parti.</p>
+                        <p>I libri che salvi nella <strong>Libreria</strong> restano archiviati sul server in modo privato: sono visibili solo dal tuo browser o dai dispositivi a cui dai il codice della tua libreria, e puoi eliminarli in qualsiasi momento dal cestino.</p>
                     </div>
                 </div>
 
@@ -610,6 +638,9 @@
     let availableModels = [];
     let fileAnalysis = null;
     let pollInterval = null;
+    let libraryBook = null;          // book picked from the library (/?book=<id>)
+    let translationBookId = null;    // library book the running translation belongs to
+    let logsSeen = 0;
 
     const uploadZone = document.getElementById('upload-zone');
     const fileInput = document.getElementById('file-input');
@@ -644,6 +675,11 @@
     const modelColumns = document.getElementById('model-columns');
     const modelLoading = document.getElementById('model-loading');
     const noModelsWarning = document.getElementById('no-models-warning');
+    const saveLibrary = document.getElementById('save-library');
+    const saveToLibrary = document.getElementById('save-to-library');
+    const fileCardLibrary = document.getElementById('file-card-library');
+    const downloadLibraryLink = document.getElementById('download-library-link');
+    const navLibraryCount = document.getElementById('nav-library-count');
 
     // =========================================================================
     // LOAD MODELS ON STARTUP
@@ -762,6 +798,8 @@
                 modelColumns.appendChild(column);
             }
 
+            // A library book can be loaded before the models: show its costs now
+            if (fileAnalysis) calculateAllModelCosts(fileAnalysis.estimated_tokens);
             updateTranslateButton();
 
         } catch (err) {
@@ -797,7 +835,7 @@
     }
 
     function updateTranslateButton() {
-        translateBtn.disabled = !(selectedFile && selectedModel && fileAnalysis);
+        translateBtn.disabled = !((selectedFile || libraryBook) && selectedModel && fileAnalysis);
     }
 
     // Load models when page opens
@@ -844,6 +882,7 @@
             return;
         }
 
+        exitBookMode();
         selectedFile = file;
         fileAnalysis = null;
 
@@ -853,6 +892,7 @@
         fileCardType.className = 'file-card-type badge-' + ext;
         fileCard.classList.add('visible');
         uploadZone.classList.add('has-file');
+        saveLibrary.hidden = false;
 
         // Hide previous results
         downloadSection.classList.remove('visible');
@@ -874,9 +914,11 @@
     }
 
     function clearFile() {
+        exitBookMode();
         selectedFile = null;
         fileAnalysis = null;
         fileInput.value = '';
+        saveLibrary.hidden = true;
         fileCard.classList.remove('visible');
         uploadZone.classList.remove('has-file');
         translateBtn.disabled = true;
@@ -956,25 +998,11 @@
             if (!res.ok) throw new Error(data.error || 'Errore analisi');
 
             fileAnalysis = data;
-
-            // Show file stats
-            document.getElementById('stat-chars').textContent = formatNumber(data.total_chars);
-            document.getElementById('stat-words').textContent = formatNumber(data.total_words);
-
-            if (data.file_type === 'epub') {
-                document.getElementById('stat-pages-label').textContent = 'Capitoli';
-                document.getElementById('stat-pages').textContent = formatNumber(data.num_chapters || 0);
-            } else {
-                document.getElementById('stat-pages-label').textContent = 'Pagine';
-                document.getElementById('stat-pages').textContent = formatNumber(data.num_pages || 0);
-            }
-
-            document.getElementById('stat-tokens').textContent = formatNumber(data.estimated_tokens);
+            showFileStats(data);
 
             analyzeBadge.classList.remove('analyzing');
             analyzeBadge.classList.add('analyzed');
             analyzeBadgeText.textContent = 'Analisi completata';
-            fileStats.classList.add('visible');
 
             // Calculate costs for ALL models client-side
             calculateAllModelCosts(data.estimated_tokens);
@@ -991,6 +1019,22 @@
             analyzeBadge.classList.remove('visible', 'analyzing');
             showNotification('Errore nell\'analisi del file: ' + err.message, 'error');
         }
+    }
+
+    function showFileStats(data) {
+        document.getElementById('stat-chars').textContent = formatNumber(data.total_chars);
+        document.getElementById('stat-words').textContent = formatNumber(data.total_words);
+
+        if (data.file_type === 'epub') {
+            document.getElementById('stat-pages-label').textContent = 'Capitoli';
+            document.getElementById('stat-pages').textContent = formatNumber(data.num_chapters || 0);
+        } else {
+            document.getElementById('stat-pages-label').textContent = 'Pagine';
+            document.getElementById('stat-pages').textContent = formatNumber(data.num_pages || 0);
+        }
+
+        document.getElementById('stat-tokens').textContent = formatNumber(data.estimated_tokens);
+        fileStats.classList.add('visible');
     }
 
     function calculateAllModelCosts(inputTokens) {
@@ -1029,7 +1073,7 @@
     });
 
     async function startTranslation() {
-        if (!selectedFile || !selectedModel) return;
+        if (!(selectedFile || libraryBook) || !selectedModel) return;
 
         if (sourceLang.value === targetLang.value) {
             showNotification('Seleziona lingue diverse per la traduzione.', 'error');
@@ -1047,12 +1091,24 @@
         progressPercent.textContent = '0%';
         progressStatus.textContent = 'Caricamento file...';
         logArea.innerHTML = '';
+        logsSeen = 0;
+        translationBookId = null;
+        downloadLibraryLink.hidden = true;
 
-        addLog('Caricamento file: ' + selectedFile.name, 'info');
+        if (libraryBook) {
+            addLog('Libro dalla tua libreria: ' + libraryBook.title, 'info');
+        } else {
+            addLog('Caricamento file: ' + selectedFile.name, 'info');
+        }
         addLog('Modello: ' + selectedModel + ' (' + selectedProvider + ')', 'info');
 
         const formData = new FormData();
-        formData.append('file', selectedFile);
+        if (libraryBook) {
+            formData.append('book_id', libraryBook.id);
+        } else {
+            formData.append('file', selectedFile);
+            if (saveToLibrary.checked) formData.append('save_to_library', '1');
+        }
         formData.append('source_lang', sourceLang.value);
         formData.append('target_lang', targetLang.value);
         formData.append('provider', selectedProvider);
@@ -1065,6 +1121,11 @@
             if (!response.ok) throw new Error(data.error || 'Errore del server');
 
             addLog('File caricato. Inizio traduzione...', 'info');
+            translationBookId = data.book_id || null;
+            if (translationBookId && !libraryBook) {
+                addLog('Libro salvato nella tua libreria', 'info');
+                refreshLibraryCount();
+            }
             translateBtn.classList.remove('loading');
             pollProgress(data.task_id);
         } catch (err) {
@@ -1094,10 +1155,14 @@
                 }
 
                 if (data.logs) {
-                    const current = logArea.children.length;
-                    for (let i = current; i < data.logs.length; i++) {
-                        addLog(data.logs[i].message, data.logs[i].level);
+                    // The server may send only the latest entries: logs_total says how many exist
+                    const total = data.logs_total ?? data.logs.length;
+                    const start = total - data.logs.length;
+                    for (let i = Math.max(logsSeen, start); i < total; i++) {
+                        const entry = data.logs[i - start];
+                        addLog(entry.message, entry.level);
                     }
+                    logsSeen = Math.max(logsSeen, total);
                 }
 
                 if (data.status === 'completed') {
@@ -1107,7 +1172,12 @@
                     progressBarGlow.style.width = '100%';
                     progressPercent.textContent = '100%';
                     progressStatus.textContent = 'Completato!';
-                    addLog('Traduzione completata con successo!', 'success');
+
+                    const bookId = data.book_id || translationBookId;
+                    if (bookId) {
+                        downloadLibraryLink.href = '/libreria#/libro/' + encodeURIComponent(bookId);
+                        downloadLibraryLink.hidden = false;
+                    }
 
                     downloadBtn.href = '/api/download/' + taskId;
                     downloadBtn.download = data.output_filename || 'tradotto';
@@ -1155,6 +1225,96 @@
             setTimeout(() => n.remove(), 300);
         }, 3000);
     }
+
+    // =========================================================================
+    // LIBRARY INTEGRATION
+    // =========================================================================
+    async function refreshLibraryCount() {
+        try {
+            const res = await fetch('/api/library/summary');
+            if (!res.ok) return;
+            const data = await res.json();
+            navLibraryCount.textContent = formatNumber(data.books);
+            navLibraryCount.hidden = !data.books;
+        } catch (err) {
+            /* the library is optional */
+        }
+    }
+
+    function selectSourceLanguage(language) {
+        const options = sourceLang.options;
+        for (let i = 0; i < options.length; i++) {
+            if (options[i].value.toLowerCase() === String(language).toLowerCase()) {
+                sourceLang.value = options[i].value;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function exitBookMode() {
+        if (!libraryBook) return;
+        libraryBook = null;
+        fileCardLibrary.hidden = true;
+        const url = new URL(window.location.href);
+        if (url.searchParams.has('book')) {
+            url.searchParams.delete('book');
+            history.replaceState(null, '', url.pathname + url.search + url.hash);
+        }
+    }
+
+    async function loadLibraryBook(bookId) {
+        try {
+            const res = await fetch('/api/library/books/' + encodeURIComponent(bookId));
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Libro non trovato nella tua libreria');
+            const book = data.book;
+
+            libraryBook = book;
+            selectedFile = null;
+            fileInput.value = '';
+
+            fileCardName.textContent = book.title;
+            fileCardSize.textContent = formatSize(book.file_size);
+            fileCardType.textContent = book.file_type.toUpperCase();
+            fileCardType.className = 'file-card-type badge-' + book.file_type;
+            fileCardLibrary.hidden = false;
+            fileCard.classList.add('visible');
+            uploadZone.classList.add('has-file');
+            saveLibrary.hidden = true;
+            downloadSection.classList.remove('visible');
+            errorSection.classList.remove('visible');
+            progressSection.classList.remove('visible');
+
+            fileAnalysis = {
+                file_type: book.file_type,
+                total_chars: book.total_chars || 0,
+                total_words: book.total_words || 0,
+                num_pages: book.num_pages || 0,
+                num_chapters: book.num_chapters || 0,
+                estimated_tokens: book.estimated_tokens || 0,
+            };
+            showFileStats(fileAnalysis);
+            calculateAllModelCosts(fileAnalysis.estimated_tokens);
+
+            if (book.language && selectSourceLanguage(book.language)) {
+                detectBadge.classList.add('visible', 'detected');
+                detectBadge.classList.remove('detecting');
+                detectBadgeText.textContent = 'Rilevato: ' + book.language;
+                if (sourceLang.value === targetLang.value) {
+                    targetLang.value = sourceLang.value === 'Italian' ? 'English' : 'Italian';
+                }
+            }
+            updateTranslateButton();
+        } catch (err) {
+            exitBookMode();
+            showNotification(err.message, 'error');
+        }
+    }
+
+    refreshLibraryCount();
+    const bookParam = new URLSearchParams(window.location.search).get('book');
+    if (bookParam) loadLibraryBook(bookParam);
 
     // =========================================================================
     // FAQ ACCORDION

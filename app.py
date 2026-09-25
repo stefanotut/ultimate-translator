@@ -15,6 +15,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+import library_db
+import library
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -32,14 +35,18 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 ALLOWED_EXTENSIONS = {'epub', 'pdf'}
 
-# In-memory task store
+# Personal library (SQLite + files, see LIBRARY_DATA_DIR)
+library_db.init()
+app.register_blueprint(library.bp)
+
+# In-memory task store (the running jobs of this worker process)
 tasks = {}
 
 
 class TranslationTask:
     def __init__(self, task_id, input_path, output_path, file_type,
                  source_lang, target_lang, original_filename,
-                 provider, model):
+                 provider, model, book_id=None, library_id=None):
         self.task_id = task_id
         self.input_path = input_path
         self.output_path = output_path
@@ -49,12 +56,28 @@ class TranslationTask:
         self.original_filename = original_filename
         self.provider = provider
         self.model = model
+        self.book_id = book_id
+        self.library_id = library_id
         self.status = 'pending'
         self.progress = 0.0
         self.status_text = 'In attesa...'
         self.error = None
         self.logs = []
         self.output_filename = None
+        # Persisted so every gunicorn worker can answer status/download requests
+        library_db.create_translation(
+            task_id,
+            library_id=library_id,
+            book_id=book_id,
+            source_lang=source_lang,
+            target_lang=target_lang,
+            provider=provider,
+            model=model,
+            file_type=file_type,
+            input_path=library_db.stored_path(input_path),
+            output_path=library_db.stored_path(output_path),
+            status_text=self.status_text,
+        )
 
     def add_log(self, message, level='info'):
         self.logs.append({
@@ -63,6 +86,22 @@ class TranslationTask:
             'time': time.time()
         })
         logger.info(f"[{self.task_id[:8]}] {message}")
+        self.save()
+
+    def save(self):
+        try:
+            library_db.update_translation(
+                self.task_id,
+                status=self.status,
+                progress=self.progress,
+                status_text=self.status_text,
+                error=self.error,
+                output_filename=self.output_filename,
+                logs=self.logs,
+                logs_total=len(self.logs),
+            )
+        except Exception as e:
+            logger.warning(f"[{self.task_id[:8]}] Could not persist translation state: {e}")
 
     def to_dict(self):
         return {
@@ -72,8 +111,25 @@ class TranslationTask:
             'status_text': self.status_text,
             'error': self.error,
             'logs': self.logs,
+            'logs_total': len(self.logs),
             'output_filename': self.output_filename,
+            'book_id': self.book_id,
         }
+
+
+def _status_from_record(record):
+    """Status payload for a job running in another worker (or already finished)."""
+    return {
+        'task_id': record['id'],
+        'status': record['status'],
+        'progress': record['progress'],
+        'status_text': record['status_text'],
+        'error': record['error'],
+        'logs': record['logs'],
+        'logs_total': record['logs_total'],
+        'output_filename': record['output_filename'],
+        'book_id': record['book_id'],
+    }
 
 
 def get_extension(filename):
@@ -147,6 +203,11 @@ def run_translation(task):
 
 
 # === Routes ===
+
+@app.errorhandler(413)
+def file_too_large(_error):
+    return jsonify({'error': 'File troppo grande. Massimo 100MB.'}), 413
+
 
 @app.route('/')
 def index():
@@ -238,17 +299,22 @@ def api_analyze():
 
 @app.route('/api/translate', methods=['POST'])
 def api_translate():
-    """Upload a file and start translation."""
-    if 'file' not in request.files:
-        return jsonify({'error': 'Nessun file caricato'}), 400
+    """Upload a file (or pick a book from the library) and start translation."""
+    book_id = (request.form.get('book_id') or '').strip()
+    save_to_library = request.form.get('save_to_library', '').lower() in ('1', 'true', 'on', 'yes')
 
-    file = request.files['file']
-    if not file.filename:
-        return jsonify({'error': 'Nessun file selezionato'}), 400
+    file = None
+    if not book_id:
+        if 'file' not in request.files:
+            return jsonify({'error': 'Nessun file caricato'}), 400
 
-    ext = get_extension(file.filename)
-    if ext not in ALLOWED_EXTENSIONS:
-        return jsonify({'error': f'Formato non supportato: .{ext}. Usa EPUB o PDF.'}), 400
+        file = request.files['file']
+        if not file.filename:
+            return jsonify({'error': 'Nessun file selezionato'}), 400
+
+        ext = get_extension(file.filename)
+        if ext not in ALLOWED_EXTENSIONS:
+            return jsonify({'error': f'Formato non supportato: .{ext}. Usa EPUB o PDF.'}), 400
 
     source_lang = request.form.get('source_lang', 'English')
     target_lang = request.form.get('target_lang', 'Italian')
@@ -272,14 +338,41 @@ def api_translate():
     if not keys.get(provider):
         return jsonify({'error': f'Chiave API {provider} non configurata'}), 400
 
-    # Save uploaded file
     task_id = str(uuid.uuid4())
-    safe_name = secure_filename(file.filename)
-    input_path = os.path.join(UPLOAD_DIR, f"{task_id}_{safe_name}")
-    output_path = os.path.join(OUTPUT_DIR, f"{task_id}_translated.{ext}")
+    book = None
+    library_id = None
 
-    file.save(input_path)
-    logger.info(f"File saved: {input_path} ({os.path.getsize(input_path)} bytes)")
+    if book_id:
+        # Translate a book that is already in the user's library
+        library_id = library.current_library_id(create=False)
+        book = library_db.get_book_record(library_id, book_id) if library_id else None
+        if not book:
+            return jsonify({'error': 'Libro non trovato nella tua libreria'}), 404
+    elif save_to_library:
+        # Keep the uploaded book in the library (auto-tagged); the translation is attached to it
+        library_id = library.current_library_id()
+        try:
+            imported, _ = library.import_book(library_id, file, reuse_duplicate=True)
+        except library_db.LibraryError as e:
+            return jsonify({'error': e.message}), e.status
+        book = library_db.get_book_record(library_id, imported['id'])
+
+    if book:
+        ext = book['file_type']
+        input_path = library_db.abs_path(book['file_path'])
+        output_path = library_db.abs_path(library_db.translation_rel(library_id, task_id, ext))
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        original_filename = library.download_name(book['title'], ext)
+        logger.info(f"Translating library book {book['id'][:8]}")
+    else:
+        # Save uploaded file
+        safe_name = secure_filename(file.filename)
+        input_path = os.path.join(UPLOAD_DIR, f"{task_id}_{safe_name}")
+        output_path = os.path.join(OUTPUT_DIR, f"{task_id}_translated.{ext}")
+        original_filename = file.filename
+
+        file.save(input_path)
+        logger.info(f"File saved: {input_path} ({os.path.getsize(input_path)} bytes)")
 
     # Create task
     task = TranslationTask(
@@ -289,9 +382,11 @@ def api_translate():
         file_type=ext,
         source_lang=source_lang,
         target_lang=target_lang,
-        original_filename=file.filename,
+        original_filename=original_filename,
         provider=provider,
         model=model,
+        book_id=book['id'] if book else None,
+        library_id=library_id if book else None,
     )
     tasks[task_id] = task
 
@@ -299,35 +394,49 @@ def api_translate():
     thread = threading.Thread(target=run_translation, args=(task,), daemon=True)
     thread.start()
 
-    return jsonify({'task_id': task_id, 'status': 'started'})
+    return jsonify({
+        'task_id': task_id,
+        'status': 'started',
+        'book_id': book['id'] if book else None,
+    })
 
 
 @app.route('/api/status/<task_id>')
 def api_status(task_id):
-    """Get translation status."""
+    """Get translation status (from this worker, or from the shared job store)."""
     task = tasks.get(task_id)
-    if not task:
+    if task:
+        return jsonify(task.to_dict())
+    record = library_db.get_translation(task_id)
+    if not record:
         return jsonify({'error': 'Task non trovato'}), 404
-    return jsonify(task.to_dict())
+    return jsonify(_status_from_record(record))
 
 
 @app.route('/api/download/<task_id>')
 def api_download(task_id):
     """Download translated file."""
     task = tasks.get(task_id)
-    if not task:
-        return jsonify({'error': 'Task non trovato'}), 404
+    if task:
+        status, output_path, output_filename = task.status, task.output_path, task.output_filename
+    else:
+        record = library_db.get_translation(task_id)
+        if not record:
+            return jsonify({'error': 'Task non trovato'}), 404
+        status = record['status']
+        output_path = library_db.abs_path(record['output_path'])
+        output_filename = record['output_filename']
 
-    if task.status != 'completed':
+    if status != 'completed':
         return jsonify({'error': 'Traduzione non ancora completata'}), 400
 
-    if not os.path.exists(task.output_path):
+    if not output_path or not os.path.exists(output_path):
         return jsonify({'error': 'File tradotto non trovato'}), 404
 
     return send_file(
-        task.output_path,
+        output_path,
         as_attachment=True,
-        download_name=task.output_filename
+        download_name=output_filename
     )
 
 
