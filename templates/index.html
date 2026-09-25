@@ -57,7 +57,7 @@
                 "name": "Quanto costa tradurre un libro?",
                 "acceptedAnswer": {
                     "@type": "Answer",
-                    "text": "Il costo dipende dalla lunghezza del libro e dal modello scelto. Un libro di 300 pagine costa circa $0.02-0.15 con GPT-4.1 o $0.03-0.30 con Claude Sonnet 4. I modelli economici come GPT-4.1 Nano possono costare meno di $0.01."
+                    "text": "Il costo dipende dalla lunghezza del libro e dal modello scelto. Un libro di 300 pagine costa circa $1-2 con GPT-4.1 o $2-3 con Claude Sonnet 5. I modelli economici come GPT-4.1 Nano costano pochi centesimi."
                 }
             },
             {
@@ -65,7 +65,7 @@
                 "name": "Qual e il modello migliore per tradurre?",
                 "acceptedAnswer": {
                     "@type": "Answer",
-                    "text": "Consigliamo GPT-4.1 per OpenAI e Claude Sonnet 4 per Anthropic. Offrono il miglior rapporto qualita/prezzo per la traduzione di libri e documenti."
+                    "text": "Consigliamo GPT-4.1 per OpenAI e Claude Sonnet 5 per Anthropic. Offrono il miglior rapporto qualita/prezzo per la traduzione di libri e documenti."
                 }
             },
             {
@@ -347,7 +347,7 @@
             <div class="progress-card-header">
                 <div class="progress-card-title">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
-                    Traduzione in corso
+                    <span id="progress-title">Traduzione in corso</span>
                 </div>
                 <div class="progress-percent" id="progress-percent">0%</div>
             </div>
@@ -416,12 +416,12 @@
                     <div class="faq-answer">
                         <p>Il costo dipende dalla lunghezza del testo e dal modello AI scelto. Ecco alcune stime per un libro di circa 300 pagine (~80.000 parole):</p>
                         <ul>
-                            <li><strong>GPT-4.1 (consigliato OpenAI):</strong> circa $0.02 - $0.15</li>
-                            <li><strong>Claude Sonnet 4 (consigliato Anthropic):</strong> circa $0.03 - $0.30</li>
-                            <li><strong>GPT-4.1 Nano (ultra economico):</strong> meno di $0.01</li>
-                            <li><strong>Claude Opus 4 (massima qualita):</strong> circa $0.50 - $2.00</li>
+                            <li><strong>GPT-4.1 (consigliato OpenAI):</strong> circa $1 - $2</li>
+                            <li><strong>Claude Sonnet 5 (consigliato Anthropic):</strong> circa $2 - $3</li>
+                            <li><strong>GPT-4.1 Nano (ultra economico):</strong> meno di $0.10</li>
+                            <li><strong>Claude Opus 5 (massima qualita):</strong> circa $5 - $7</li>
                         </ul>
-                        <p>Carica il tuo file per vedere il costo stimato esatto per ogni modello.</p>
+                        <p>Carica il tuo file per vedere il costo stimato per ogni modello. A fine traduzione il registro mostra il costo API effettivo.</p>
                     </div>
                 </div>
 
@@ -433,8 +433,8 @@
                     <div class="faq-answer">
                         <p>Dipende dalle tue esigenze:</p>
                         <ul>
-                            <li><strong>Per la migliore qualita:</strong> Claude Opus 4 o GPT-5.2 offrono traduzioni di livello letterario, ideali per narrativa e testi complessi.</li>
-                            <li><strong>Miglior rapporto qualita/prezzo:</strong> GPT-4.1 e Claude Sonnet 4 sono eccellenti per la maggior parte dei libri e documenti.</li>
+                            <li><strong>Per la migliore qualita:</strong> Claude Opus 5 o GPT-5.2 offrono traduzioni di livello letterario, ideali per narrativa e testi complessi.</li>
+                            <li><strong>Miglior rapporto qualita/prezzo:</strong> GPT-4.1 e Claude Sonnet 5 sono eccellenti per la maggior parte dei libri e documenti.</li>
                             <li><strong>Per risparmiare:</strong> GPT-4.1 Mini o Nano sono ottimi per bozze o testi semplici.</li>
                         </ul>
                     </div>
@@ -449,7 +449,7 @@
                         <p>I nostri consigli:</p>
                         <ul>
                             <li><strong>OpenAI:</strong> GPT-4.1 &mdash; offre il miglior rapporto qualita/prezzo. Ottimo per libri, documenti tecnici e testi generali.</li>
-                            <li><strong>Anthropic:</strong> Claude Sonnet 4 &mdash; perfetto equilibrio tra qualita, velocita e prezzo. Eccellente per traduzioni fluide e naturali.</li>
+                            <li><strong>Anthropic:</strong> Claude Sonnet 5 &mdash; perfetto equilibrio tra qualita, velocita e prezzo. Eccellente per traduzioni fluide e naturali.</li>
                         </ul>
                     </div>
                 </div>
@@ -473,10 +473,10 @@
                         <p>Il tempo dipende dalla lunghezza del libro e dal modello scelto. In generale:</p>
                         <ul>
                             <li><strong>Documento breve (10-50 pagine):</strong> 1-5 minuti</li>
-                            <li><strong>Libro medio (200-400 pagine):</strong> 5-15 minuti</li>
-                            <li><strong>Libro lungo (500+ pagine):</strong> 15-30 minuti</li>
+                            <li><strong>Libro medio (200-400 pagine):</strong> indicativamente 15-40 minuti</li>
+                            <li><strong>Libro lungo (500+ pagine):</strong> anche oltre un'ora</li>
                         </ul>
-                        <p>I modelli piu veloci (Haiku, GPT-4.1 Mini/Nano) completano la traduzione in meno tempo.</p>
+                        <p>I modelli piu veloci (Haiku, GPT-4.1 Mini/Nano) completano la traduzione in meno tempo. Se la traduzione si interrompe (credito esaurito, rete, riavvio), riavviala: le parti gia tradotte vengono riprese all'istante e non si pagano di nuovo.</p>
                     </div>
                 </div>
 
@@ -550,13 +550,13 @@
         'o3': 'Modello di ragionamento. Non ideale per traduzione.',
         'o3-mini': 'Modello di ragionamento. Non ideale per traduzione.',
         'o1': 'Modello di ragionamento. Non ideale per traduzione.',
-        'claude-opus-4-20250514': 'Il piu potente. Qualita letteraria eccezionale.',
-        'claude-sonnet-4-20250514': 'Perfetto equilibrio qualita/velocita/prezzo.',
-        'claude-haiku-3-5-20241022': 'Velocissimo e economico. Buono per testi brevi.',
+        'claude-opus-5': 'Il piu potente. Qualita letteraria eccezionale.',
+        'claude-sonnet-5': 'Perfetto equilibrio qualita/velocita/prezzo.',
+        'claude-haiku-4-5': 'Velocissimo e economico. Buono per testi semplici.',
     };
 
     // Models that get the CONSIGLIATO badge
-    const RECOMMENDED_MODELS = ['gpt-4.1', 'claude-sonnet-4-20250514'];
+    const RECOMMENDED_MODELS = ['gpt-4.1', 'claude-sonnet-5'];
 
     // =========================================================================
     // PARTICLE BACKGROUND
@@ -662,6 +662,7 @@
     const progressBarGlow = document.getElementById('progress-bar-glow');
     const progressStatus = document.getElementById('progress-status');
     const progressPercent = document.getElementById('progress-percent');
+    const progressTitle = document.getElementById('progress-title');
     const logArea = document.getElementById('log-area');
     const downloadSection = document.getElementById('download-section');
     const downloadBtn = document.getElementById('download-btn');
@@ -694,7 +695,7 @@
             const apiStatus = data.api_status || {};
 
             // Update API status bar
-            updateApiStatusBar(apiStatus);
+            updateApiStatusBar(apiStatus, data.api_errors || {});
 
             // Build model columns
             modelColumns.innerHTML = '';
@@ -798,6 +799,10 @@
                 modelColumns.appendChild(column);
             }
 
+            if (!selectedModel || !availableModels.some(m => m.id === selectedModel)) {
+                selectModel(availableModels[0].id, availableModels[0].provider);
+            }
+
             // A library book can be loaded before the models: show its costs now
             if (fileAnalysis) calculateAllModelCosts(fileAnalysis.estimated_tokens);
             updateTranslateButton();
@@ -820,17 +825,16 @@
         updateTranslateButton();
     }
 
-    function updateApiStatusBar(status) {
-        const openaiEl = document.getElementById('api-status-openai');
-        const anthropicEl = document.getElementById('api-status-anthropic');
-
-        if (status.openai) {
-            openaiEl.querySelector('.api-dot').className = 'api-dot api-dot-connected';
-            openaiEl.querySelector('.api-status-label').textContent = 'Connesso';
-        }
-        if (status.anthropic) {
-            anthropicEl.querySelector('.api-dot').className = 'api-dot api-dot-connected';
-            anthropicEl.querySelector('.api-status-label').textContent = 'Connesso';
+    function updateApiStatusBar(status, errors) {
+        for (const provider of ['openai', 'anthropic']) {
+            const el = document.getElementById('api-status-' + provider);
+            if (status[provider]) {
+                el.querySelector('.api-dot').className = 'api-dot api-dot-connected';
+                el.querySelector('.api-status-label').textContent = 'Connesso';
+            } else if (errors[provider]) {
+                el.querySelector('.api-dot').className = 'api-dot api-dot-disconnected';
+                el.querySelector('.api-status-label').textContent = errors[provider];
+            }
         }
     }
 
@@ -1038,10 +1042,13 @@
     }
 
     function calculateAllModelCosts(inputTokens) {
-        const outputTokens = Math.round(inputTokens * 1.1);
-
         for (const m of availableModels) {
-            const inputCost = (inputTokens / 1_000_000) * m.input_cost;
+            // Newer tokenizers count more tokens for the same text; every request also carries
+            // the instructions and some context (~50% more input); thinking adds output tokens.
+            const textTokens = inputTokens * (m.token_factor || 1);
+            const billedInput = textTokens * 1.5;
+            const outputTokens = textTokens * (m.output_factor || 1.1);
+            const inputCost = (billedInput / 1_000_000) * m.input_cost;
             const outputCost = (outputTokens / 1_000_000) * m.output_cost;
             const totalCost = inputCost + outputCost;
 
@@ -1090,6 +1097,8 @@
         progressBarGlow.style.width = '0%';
         progressPercent.textContent = '0%';
         progressStatus.textContent = 'Caricamento file...';
+        progressTitle.textContent = 'Traduzione in corso';
+        progressSection.classList.remove('done');
         logArea.innerHTML = '';
         logsSeen = 0;
         translationBookId = null;
@@ -1171,7 +1180,9 @@
                     progressBar.style.width = '100%';
                     progressBarGlow.style.width = '100%';
                     progressPercent.textContent = '100%';
-                    progressStatus.textContent = 'Completato!';
+                    progressStatus.textContent = data.status_text || 'Completato!';
+                    progressTitle.textContent = 'Traduzione completata';
+                    progressSection.classList.add('done');
 
                     const bookId = data.book_id || translationBookId;
                     if (bookId) {

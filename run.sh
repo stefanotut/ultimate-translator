@@ -102,6 +102,6 @@ fi
 
 # Start server
 echo "  Avvio ULTIMATE TRANSLATOR..."
-echo "  Apri il browser: http://localhost:5000"
+echo "  Apri il browser: http://localhost:${PORT:-5001}"
 echo ""
 python3 app.py

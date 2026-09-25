@@ -5,17 +5,32 @@ Supports both OpenAI and Anthropic providers.
 
 Strategy:
 - Group nearby text blocks that likely belong to the same paragraph
-- Translate grouped blocks with context awareness
-- Redact original text and overlay translated text preserving colors and fonts
-- Smart font size reduction to fit translated text in the same bounding box
+- Translate the groups of a page together, with the previous page as context
+- Redact the original text and overlay the translation with the original
+  color, size, weight and style, in fonts that cover every script
+- Shrink the text when the translation needs more room than the original
 """
 
 import os
+import re
+import html
 import logging
-import fitz  # PyMuPDF
-from translator import translate_text, estimate_tokens
+
+try:
+    import pymupdf as fitz  # PyMuPDF >= 1.24.3
+except ImportError:  # older PyMuPDF releases only have the fitz name
+    import fitz
+
+from translator import (
+    DEFAULT_MODELS, FatalTranslationError, TranslationError, TranslationSession, estimate_tokens,
+)
 
 logger = logging.getLogger(__name__)
+
+RTL_LANGUAGES = frozenset({'Arabic', 'Hebrew', 'Persian', 'Urdu'})
+_SERIF_HINTS = ('times', 'serif', 'roman', 'georgia', 'garamond', 'minion', 'palatino', 'cambria',
+                'baskerville', 'bookman', 'century', 'caslon', 'charter', 'didot', 'bodoni', 'antiqua')
+_MONO_HINTS = ('courier', 'mono', 'consolas', 'menlo', 'inconsolata')
 
 
 # ---------------------------------------------------------------------------
@@ -51,6 +66,22 @@ def _extract_color(span: dict) -> tuple:
     return (0, 0, 0)
 
 
+def _join_lines(lines: list) -> str:
+    """The lines of one text block as flowing text (the PDF broke them only to fit the page)."""
+    text = ""
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        if not text:
+            text = line
+        elif re.search(r"\w-$", text) and line[:1].islower():
+            text = text[:-1] + line  # word hyphenated at the end of the line
+        else:
+            text += " " + line
+    return text
+
+
 def _group_nearby_blocks(blocks: list, vertical_threshold: float = 5.0) -> list:
     """
     Group text blocks that are vertically close together and share similar
@@ -67,6 +98,7 @@ def _group_nearby_blocks(blocks: list, vertical_threshold: float = 5.0) -> list:
         "text": sorted_blocks[0]["text"],
         "bbox": fitz.Rect(sorted_blocks[0]["bbox"]),
         "spans": list(sorted_blocks[0]["spans"]),
+        "justified": sorted_blocks[0].get("justified", False),
     }
 
     for i in range(1, len(sorted_blocks)):
@@ -85,6 +117,7 @@ def _group_nearby_blocks(blocks: list, vertical_threshold: float = 5.0) -> list:
             current_group["text"] += "\n" + block["text"]
             current_group["bbox"] = current_group["bbox"] | curr_bbox
             current_group["spans"].extend(block["spans"])
+            current_group["justified"] = current_group["justified"] or block.get("justified", False)
         else:
             groups.append(current_group)
             current_group = {
@@ -92,10 +125,114 @@ def _group_nearby_blocks(blocks: list, vertical_threshold: float = 5.0) -> list:
                 "text": block["text"],
                 "bbox": fitz.Rect(block["bbox"]),
                 "spans": list(block["spans"]),
+                "justified": block.get("justified", False),
             }
 
     groups.append(current_group)
     return groups
+
+
+def _is_justified(line_boxes: list, bbox) -> bool:
+    """Paragraph whose lines (all but the last) reach both edges of the block."""
+    full = line_boxes[:-1]
+    if len(full) < 2:
+        return False
+    tolerance = max(2.0, bbox.width * 0.01)
+    flush = sum(1 for box in full if box.x0 - bbox.x0 <= tolerance and bbox.x1 - box.x1 <= tolerance)
+    return flush >= len(full) * 0.7
+
+
+def _page_blocks(page) -> list:
+    """Text blocks of a page with their text, box and spans."""
+    text_dict = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)
+    raw_blocks = []
+    for block in text_dict.get("blocks", []):
+        if block.get("type") != 0:
+            continue
+
+        lines = []
+        line_boxes = []
+        block_spans = []
+        for line in block.get("lines", []):
+            line_text = ""
+            for span in line.get("spans", []):
+                span_text = span.get("text", "")
+                line_text += span_text
+                if _is_translatable(span_text):
+                    block_spans.append(span)
+            lines.append(line_text)
+            if line_text.strip():
+                line_boxes.append(fitz.Rect(line["bbox"]))
+
+        block_text = _join_lines(lines)
+        if not _is_translatable(block_text):
+            continue
+
+        bbox = fitz.Rect(block["bbox"])
+        font_name, font_size = _get_dominant_font(block_spans)
+        raw_blocks.append({
+            "text": block_text,
+            "bbox": bbox,
+            "font_name": font_name,
+            "font_size": font_size,
+            "spans": block_spans,
+            "justified": _is_justified(line_boxes, bbox),
+        })
+    return raw_blocks
+
+
+def _css_for(group: dict, target_lang: str) -> str:
+    """CSS reproducing the look of the original text (size, color, weight, style, family)."""
+    spans = group["spans"]
+    best = max(spans, key=lambda s: len(s.get("text", ""))) if spans else {}
+    font_name, font_size = _get_dominant_font(spans)
+    name = (font_name or "").lower()
+    flags = best.get("flags", 0) or 0
+
+    if flags & 8 or any(h in name for h in _MONO_HINTS):
+        family = "monospace"
+    elif "sans" not in name and (flags & 4 or any(h in name for h in _SERIF_HINTS)):
+        family = "serif"
+    else:
+        family = "sans-serif"
+    bold = bool(flags & 16) or any(h in name for h in ("bold", "black", "heavy", "semibold"))
+    italic = bool(flags & 2) or "italic" in name or "oblique" in name
+    r, g, b = _extract_color(best) if best else (0, 0, 0)
+    rtl = target_lang in RTL_LANGUAGES
+    align = "justify" if group.get("justified") else ("right" if rtl else "left")
+
+    return (
+        "* {"
+        f"font-family: {family}; font-size: {max(float(font_size or 11), 4.0):.1f}px; "
+        f"color: #{int(r * 255):02x}{int(g * 255):02x}{int(b * 255):02x}; line-height: 1.15; "
+        f"font-weight: {'bold' if bold else 'normal'}; font-style: {'italic' if italic else 'normal'}; "
+        f"direction: {'rtl' if rtl else 'ltr'}; text-align: {align}; "
+        "margin: 0; padding: 0;"
+        "}"
+    )
+
+
+def _insert_translation(page, group: dict, translated: str, target_lang: str):
+    """Write the translation in the box of the original text, shrinking it if needed."""
+    bbox = group["bbox"]
+    try:
+        body = html.escape(translated).replace("\n", "<br/>")
+        page.insert_htmlbox(bbox, body, css=_css_for(group, target_lang), scale_low=0)
+        return
+    except Exception as e:
+        logger.warning(f"insert_htmlbox failed, using the basic font: {e}")
+
+    # Fallback: base-14 font (Latin text only)
+    font_name, font_size = _get_dominant_font(group["spans"])
+    color = _extract_color(group["spans"][0]) if group["spans"] else (0, 0, 0)
+    current_size = font_size
+    min_size = max(font_size * 0.55, 5.5)
+    while current_size >= min_size:
+        rc = page.insert_textbox(bbox, translated, fontsize=current_size, fontname="helv",
+                                 color=color, align=fitz.TEXT_ALIGN_LEFT)
+        if rc >= 0:
+            return
+        current_size -= 0.5
 
 
 def extract_text_sample(input_path: str, max_chars: int = 1000) -> str:
@@ -104,7 +241,11 @@ def extract_text_sample(input_path: str, max_chars: int = 1000) -> str:
         doc = fitz.open(input_path)
         if len(doc) == 0:
             return ""
-        text = doc[0].get_text("text")
+        text = ""
+        for page in doc:
+            text += page.get_text("text")
+            if len(text.strip()) >= max_chars:
+                break
         doc.close()
         return text[:max_chars]
     except Exception as e:
@@ -162,162 +303,117 @@ def translate_pdf(
     source_lang: str = "English",
     target_lang: str = "Italian",
     provider: str = "anthropic",
-    model: str = "claude-sonnet-4-20250514",
+    model: str = DEFAULT_MODELS["anthropic"],
     progress_callback=None,
+    session=None,
 ):
     """
     Translate a PDF file preserving layout and images.
     Groups nearby text blocks for more coherent translations.
+    Raises TranslationError when nothing could be translated.
     """
-    doc = fitz.open(input_path)
-    total_pages = len(doc)
+    session = session or TranslationSession(source_lang, target_lang, model)
+    try:
+        doc = fitz.open(input_path)
+    except Exception as e:
+        raise TranslationError(f"PDF non leggibile (file danneggiato o non e un PDF): {e}") from e
 
-    logger.info(f"PDF has {total_pages} pages to translate")
+    try:
+        if not doc.is_pdf:
+            raise TranslationError("Il file non e un PDF valido (forse un'immagine o una pagina web salvata come .pdf).")
+        if doc.needs_pass:
+            raise TranslationError("Questo PDF e protetto da password: rimuovi la password e riprova.")
 
-    if total_pages == 0:
-        logger.warning("PDF has no pages")
-        doc.save(output_path)
-        doc.close()
-        if progress_callback:
-            progress_callback(1.0, "Completato! (PDF vuoto)")
-        return
+        total_pages = len(doc)
+        logger.info(f"PDF has {total_pages} pages to translate")
+        if total_pages == 0:
+            raise TranslationError("Questo PDF non ha pagine.")
 
-    previous_translated = ""
+        previous_translated = ""
+        text_groups = 0
+        failed_pages = []
 
-    for page_num in range(total_pages):
-        page = doc[page_num]
-
-        logger.info(f"  Translating page {page_num + 1}/{total_pages}")
-
-        if progress_callback:
-            progress = page_num / total_pages
-            progress_callback(
-                progress,
-                f"Pagina {page_num + 1}/{total_pages} - Analisi layout..."
-            )
-
-        text_dict = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)
-
-        raw_blocks = []
-
-        for block in text_dict.get("blocks", []):
-            if block.get("type") != 0:
-                continue
-
-            block_text = ""
-            block_spans = []
-
-            for line in block.get("lines", []):
-                line_text = ""
-                for span in line.get("spans", []):
-                    span_text = span.get("text", "")
-                    line_text += span_text
-                    if _is_translatable(span_text):
-                        block_spans.append(span)
-                block_text += line_text + "\n"
-
-            block_text = block_text.strip()
-            if not _is_translatable(block_text):
-                continue
-
-            bbox = fitz.Rect(block["bbox"])
-            font_name, font_size = _get_dominant_font(block_spans)
-
-            raw_blocks.append({
-                "text": block_text,
-                "bbox": bbox,
-                "font_name": font_name,
-                "font_size": font_size,
-                "spans": block_spans,
-            })
-
-        if not raw_blocks:
-            logger.info(f"  Page {page_num + 1}: no translatable text")
-            continue
-
-        grouped = _group_nearby_blocks(raw_blocks)
-
-        if progress_callback:
-            progress_callback(
-                page_num / total_pages + 0.3 / total_pages,
-                f"Pagina {page_num + 1}/{total_pages} - Traduzione {len(grouped)} blocchi..."
-            )
-
-        for i, group in enumerate(grouped):
-            try:
-                translated = translate_text(
-                    group["text"],
-                    source_lang,
-                    target_lang,
-                    provider=provider,
-                    model=model,
-                    previous_context=previous_translated,
-                )
-                group["translated"] = translated
-                previous_translated = translated
-            except Exception as e:
-                logger.error(f"Failed to translate block on page {page_num + 1}: {e}")
-                group["translated"] = group["text"]
+        for page_num in range(total_pages):
+            page = doc[page_num]
+            logger.info(f"  Translating page {page_num + 1}/{total_pages}")
 
             if progress_callback:
-                block_progress = (page_num + (i + 1) / len(grouped)) / total_pages
                 progress_callback(
-                    min(block_progress, 0.99),
-                    f"Pagina {page_num + 1}/{total_pages} - Blocco {i + 1}/{len(grouped)}"
+                    page_num / total_pages,
+                    f"Pagina {page_num + 1}/{total_pages} - Analisi layout..."
                 )
 
-        for group in grouped:
-            bbox = group["bbox"]
-            page.add_redact_annot(bbox)
+            try:
+                grouped = _group_nearby_blocks(_page_blocks(page))
+                if not grouped:
+                    logger.info(f"  Page {page_num + 1}: no translatable text")
+                    continue
+                text_groups += len(grouped)
 
-        page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
+                if progress_callback:
+                    progress_callback(
+                        page_num / total_pages + 0.3 / total_pages,
+                        f"Pagina {page_num + 1}/{total_pages} - Traduzione {len(grouped)} blocchi..."
+                    )
 
-        for group in grouped:
-            bbox = group["bbox"]
-            translated = group["translated"]
+                def page_progress(done, total, _page_num=page_num):
+                    if progress_callback:
+                        progress_callback(
+                            min((_page_num + done / max(total, 1)) / total_pages, 0.99),
+                            f"Pagina {_page_num + 1}/{total_pages} - Blocco {done}/{total}"
+                        )
 
-            font_name, font_size = _get_dominant_font(group["spans"])
+                sources = [group["text"] for group in grouped]
+                translated = session.translate_batch(sources, previous_translated, on_progress=page_progress)
+                changed = [(group, value) for group, source, value in zip(grouped, sources, translated)
+                           if value != source]
+                if not changed:
+                    continue  # nothing translated here: the page keeps its original text
+                previous_translated = "\n".join(value for _, value in changed)[-800:]
 
-            color = (0, 0, 0)
-            if group["spans"]:
-                color = _extract_color(group["spans"][0])
+                for group, _ in changed:
+                    page.add_redact_annot(group["bbox"])
+                page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
 
-            fontname = "helv"
+                for group, value in changed:
+                    _insert_translation(page, group, value, target_lang)
+            except (FatalTranslationError, TranslationError):
+                raise
+            except Exception as e:
+                logger.exception(f"Page {page_num + 1} could not be translated")
+                failed_pages.append(page_num + 1)
+                if progress_callback:
+                    progress_callback(
+                        (page_num + 1) / total_pages,
+                        f"Pagina {page_num + 1}/{total_pages} - ERRORE: {str(e)[:60]}"
+                    )
 
-            rc = -1
-            current_size = font_size
-            min_size = max(font_size * 0.55, 5.5)
+        if text_groups == 0:
+            raise TranslationError(
+                "Questo PDF non contiene testo selezionabile (sembra una scansione o solo immagini): "
+                "serve prima il riconoscimento del testo (OCR)."
+            )
+        if session.passages == session.untranslated:
+            raise TranslationError(
+                "Nessuna parte del documento e stata tradotta: il modello ha rifiutato tutte le sezioni. "
+                "Prova con un altro modello."
+            )
 
-            while current_size >= min_size:
-                rc = page.insert_textbox(
-                    bbox,
-                    translated,
-                    fontsize=current_size,
-                    fontname=fontname,
-                    color=color,
-                    align=fitz.TEXT_ALIGN_LEFT,
-                )
-                if rc >= 0:
-                    break
-                current_size -= 0.5
+        if progress_callback:
+            progress_callback(0.99, "Salvataggio PDF...")
 
-            if rc < 0:
-                page.insert_textbox(
-                    bbox,
-                    translated,
-                    fontsize=min_size,
-                    fontname=fontname,
-                    color=color,
-                    align=fitz.TEXT_ALIGN_LEFT,
-                )
-
-    if progress_callback:
-        progress_callback(0.99, "Salvataggio PDF...")
-
-    doc.save(output_path, garbage=4, deflate=True, clean=True)
-    doc.close()
+        partial = output_path + ".part"
+        try:
+            doc.save(partial, garbage=4, deflate=True, clean=True)
+            os.replace(partial, output_path)
+        finally:
+            if os.path.exists(partial):
+                os.remove(partial)
+    finally:
+        doc.close()
 
     logger.info(f"Translated PDF saved to: {output_path}")
 
     if progress_callback:
         progress_callback(1.0, "Completato!")
+    return {"failed_pages": len(failed_pages)}

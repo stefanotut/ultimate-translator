@@ -2,9 +2,9 @@ flask
 ebooklib
 beautifulsoup4
 lxml
-PyMuPDF
-anthropic
-openai
+PyMuPDF>=1.24.3
+anthropic>=0.77
+openai>=1.58
 python-dotenv
 Werkzeug
 tiktoken
