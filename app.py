@@ -1995,6 +1995,15 @@ def too_large(_e):
     return jsonify({'error': 'File troppo grande. Limite: %d MB.' % MAX_UPLOAD_MB}), 413
 
 
+# La libreria a cartelle e tag (dal branch claude/intelligent-clarke-0d4k7s),
+# ACCANTO a /libreria, che resta com'era: vedi libreria_ponte.py. Se non parte,
+# il portale parte lo stesso, con tutte le funzioni di prima.
+try:
+    import libreria_ponte
+    libreria_ponte.init(app, BASE_DIR, prepara_pdf=_linearizza_pdf, dimentica_pagine=_dimentica_pagine)
+except Exception:
+    logger.exception('Libreria a cartelle non disponibile: il portale continua senza')
+
 # I worker devono partire sia sotto gunicorn sia con `python app.py`.
 start_background()
 
